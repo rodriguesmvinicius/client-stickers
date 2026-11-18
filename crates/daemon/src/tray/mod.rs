@@ -19,6 +19,10 @@ use crate::state::TrayState;
 mod accounts;
 pub use accounts::TrayHub;
 
+/// The application's icon for the Windows tray, badged with the same state
+/// the dot carries.
+#[cfg(any(test, target_os = "windows"))]
+mod app_icon;
 /// The dot the icon-less platforms paint. Shared rather than once per tray,
 /// so no two platforms can disagree about which state gets which colour.
 /// Present on Linux for its tests alone: nothing here draws it, and the

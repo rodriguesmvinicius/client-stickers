@@ -78,7 +78,9 @@ pub(super) fn render_media_content(
                 // Prefer the app-level cache: rebuilding from bytes clones the
                 // buffer and makes GPUI decode it again on every render.
                 let image = match decoded_image.clone() {
-                    Some(cached) => img(cached.source(false))
+                    // At the size the bubble draws it; the viewer is where
+                    // the whole picture is decoded. See `Fit`.
+                    Some(cached) => img(cached.fitted(false))
                         .w(px(display_w))
                         .h(px(display_h))
                         .object_fit(gpui::ObjectFit::Contain)
@@ -465,23 +467,67 @@ fn still_image_format(media: &oxidezap_core::MediaContent) -> Option<gpui::Image
 // encoded-image cache, but load sticker frames through a dedicated asset so
 // repeated renders reuse the decoded frames on desktop and web alike.
 fn sticker_image_source(image: RetainedImage) -> ImageSource {
-    image.source(true)
+    image.fitted(true)
 }
 
 pub(crate) fn decode_sticker(bytes: &[u8]) -> image::ImageResult<Arc<RenderImage>> {
+    decode_sticker_frames(bytes, None, false)
+}
+
+/// A sticker no larger than `side` on its longest edge — and with
+/// `first_only`, its first frame alone. What the bubbles and the picker draw:
+/// an animated sticker is every frame at 512×512 when decoded whole, a
+/// megabyte a frame, for something shown a fraction of that size.
+pub(crate) fn decode_sticker_fitted(
+    bytes: &[u8],
+    side: u32,
+    first_only: bool,
+) -> image::ImageResult<Arc<RenderImage>> {
+    decode_sticker_frames(bytes, Some(side), first_only)
+}
+
+fn decode_sticker_frames(
+    bytes: &[u8],
+    side: Option<u32>,
+    first_only: bool,
+) -> image::ImageResult<Arc<RenderImage>> {
     let mut decoder = image::codecs::webp::WebPDecoder::new(Cursor::new(bytes))?;
     let frames: smallvec::SmallVec<[_; 1]> = if decoder.has_animation() {
         // WhatsApp stickers have a transparent canvas, regardless of ANIM's
         // background colour. The decoder composites frame offsets/disposal.
         let _ = decoder.set_background_color(image::Rgba([0, 0, 0, 0]));
-        decoder.into_frames().collect::<image::ImageResult<_>>()?
+        let frames = decoder.into_frames();
+        if first_only {
+            frames.take(1).collect::<image::ImageResult<_>>()?
+        } else {
+            frames.collect::<image::ImageResult<_>>()?
+        }
     } else {
         let image = image::DynamicImage::from_decoder(decoder)?.into_rgba8();
         smallvec::smallvec![image::Frame::new(image)]
     };
     let frames: smallvec::SmallVec<[_; 1]> = frames
         .into_iter()
-        .map(|mut frame| {
+        .map(|frame| {
+            let frame = match side {
+                Some(side) if frame.buffer().width().max(frame.buffer().height()) > side => {
+                    let (width, height) = crate::retained_image::fitted_size(
+                        frame.buffer().width(),
+                        frame.buffer().height(),
+                        side,
+                    );
+                    let delay = frame.delay();
+                    let scaled = image::imageops::resize(
+                        frame.buffer(),
+                        width,
+                        height,
+                        image::imageops::FilterType::Triangle,
+                    );
+                    image::Frame::from_parts(scaled, 0, 0, delay)
+                }
+                _ => frame,
+            };
+            let mut frame = frame;
             for pixel in frame.buffer_mut().as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2); // GPUI textures use BGRA.
             }
@@ -963,11 +1009,13 @@ fn render_video_player(
                         .when(can_download, |button| button.cursor_pointer())
                         .on_click({
                             let downloadable = downloadable.clone();
-                            move |_, _window, cx| {
+                            // Into the viewer, as the phone does; the bubble
+                            // plays it only where the viewer cannot.
+                            move |_, window, cx| {
                                 if let Some(dl) = downloadable.clone() {
                                     let msg_id = message_id.clone();
                                     entity.update(cx, |app, cx| {
-                                        app.toggle_video(msg_id, dl, cx);
+                                        app.open_video(msg_id, dl, window, cx);
                                     });
                                 }
                             }

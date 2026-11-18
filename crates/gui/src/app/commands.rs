@@ -85,38 +85,116 @@ impl WhatsAppApp {
     /// Silently does nothing for anything that is not a downloaded picture:
     /// the bubble decides what is tappable, and this is the backstop for a
     /// row that changed under the click.
+    ///
+    /// Whether it opened: a caller with a fallback — a video that cannot be
+    /// walked to still plays in its bubble — needs to know.
     pub fn open_media_viewer(
         &mut self,
         message_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(jid) = self.selected_chat.clone() else {
-            return;
+            return false;
         };
         let Some(chat) = self.find_chat(&jid) else {
-            return;
+            return false;
         };
         let Some(viewer) = MediaViewer::open(jid, message_id, &chat.messages) else {
-            return;
+            return false;
         };
         self.viewer.update(cx, |state, cx| state.open(viewer, cx));
         // A photo and a voice note both want the speakers; opening one stops
         // the other rather than talking over it.
         self.stop_user_media();
+        self.sync_viewer_video(cx);
         // The arrow keys follow in `sync_overlay_focus`, on this same frame —
         // and, unlike focusing here, they are handed back when the viewer
         // goes away, however it goes away.
         let _ = window;
         cx.notify();
+        true
+    }
+
+    /// A video's bubble was pressed: play it in the viewer, the way the phone
+    /// does, or in the bubble when the viewer cannot have it.
+    pub fn open_video(
+        &mut self,
+        message_id: String,
+        downloadable: DownloadableMedia,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.open_media_viewer(&message_id, window, cx) {
+            self.toggle_video(message_id, downloadable, cx);
+        }
     }
 
     pub fn close_media_viewer(&mut self, cx: &mut Context<Self>) -> bool {
+        let leaving = self.viewer.read(cx).current_id().map(str::to_string);
         let closed = self.viewer.update(cx, |state, cx| state.close(cx));
         if closed {
+            self.release_viewer_picture(leaving.as_deref());
+            self.sync_viewer_video(cx);
             cx.notify();
         }
         closed
+    }
+
+    /// The viewer has left this picture: its full-size decode goes, and the
+    /// bubble keeps the small one. See `retained_image::Fit`.
+    fn release_viewer_picture(&self, message_id: Option<&str>) {
+        if let Some(id) = message_id
+            && let Some((_, image)) = self.decoded_images.borrow().get(id)
+        {
+            image.release_full();
+        }
+    }
+
+    /// Play or pause the video on screen in the viewer.
+    pub fn toggle_viewer_video(&mut self, cx: &mut Context<Self>) {
+        let Some((id, downloadable)) = self.viewer_video_source(cx) else {
+            return;
+        };
+        self.viewer_video = Some(id.clone());
+        self.toggle_video(id, downloadable, cx);
+    }
+
+    /// The video the viewer is on, with what fetches it.
+    fn viewer_video_source(&self, cx: &App) -> Option<(String, DownloadableMedia)> {
+        let message = self.media_viewer_message(cx)?;
+        if !super::viewer::is_video(message) {
+            return None;
+        }
+        let downloadable = message.media.as_ref()?.downloadable.clone()?;
+        Some((message.id.clone(), downloadable))
+    }
+
+    /// Keep playback in step with the viewer: the video it has left stops —
+    /// including one still downloading, which would otherwise start talking
+    /// over whatever is on screen when it lands — and the one it is on
+    /// plays, as the phone does when a video is opened or swiped to.
+    pub(super) fn sync_viewer_video(&mut self, cx: &mut Context<Self>) {
+        let current = self.viewer.read(cx).current_id().map(str::to_string);
+        if let Some(left) = self.viewer_video.take() {
+            if current.as_deref() == Some(left.as_str()) {
+                self.viewer_video = Some(left);
+                return;
+            }
+            if self.active_media.message_id() == Some(left.as_str()) {
+                self.stop_user_media();
+            }
+            if self.pending_media_request.as_deref() == Some(left.as_str()) {
+                self.pending_media_request = None;
+            }
+        }
+        let Some((id, downloadable)) = self.viewer_video_source(cx) else {
+            return;
+        };
+        self.viewer_video = Some(id.clone());
+        if self.video_player_state(&id) != Some(crate::video::VideoPlayerState::Playing) {
+            self.toggle_video(id, downloadable, cx);
+        }
     }
 
     /// Walk to the next picture in the conversation.
@@ -127,9 +205,14 @@ impl WhatsAppApp {
         // The messages are read where they lie: the viewer is somewhere else
         // now, so re-resolving it no longer needs `self` mutably while a chat
         // is borrowed out of it.
+        let leaving = self.viewer.read(cx).current_id().map(str::to_string);
         let messages = self.find_chat(&jid).map(|chat| chat.messages.as_slice());
         self.viewer
             .update(cx, |state, cx| state.step(forward, messages, cx));
+        if self.viewer.read(cx).current_id() != leaving.as_deref() {
+            self.release_viewer_picture(leaving.as_deref());
+        }
+        self.sync_viewer_video(cx);
         cx.notify();
     }
 

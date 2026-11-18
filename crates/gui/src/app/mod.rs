@@ -1111,6 +1111,8 @@ pub struct WhatsAppApp {
     last_status_avatar_fingerprint: Option<u64>,
     /// The forward dialog, while it is up. See `app/forward.rs`.
     forward: Option<forward::Forwarding>,
+    /// The video the media viewer started, so leaving it can stop it.
+    viewer_video: Option<String>,
 }
 
 /// Store-backed conversation and attention facts delivered with a message.
@@ -1604,6 +1606,7 @@ impl WhatsAppApp {
             status_avatars: HashMap::new(),
             last_status_avatar_fingerprint: None,
             forward: None,
+            viewer_video: None,
         }
     }
 

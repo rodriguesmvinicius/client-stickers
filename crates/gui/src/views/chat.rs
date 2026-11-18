@@ -153,10 +153,30 @@ pub fn render_connected_view(
     let viewer = app.media_viewer(cx).and_then(|viewer| {
         let message = app.media_viewer_message(cx)?.clone();
         let media = message.media.as_ref()?;
-        let image = (!media.data.is_empty() && !media.data_is_preview)
+        let is_video = media.media_type == oxidezap_core::MediaType::Video;
+        // A video's still is its poster, and only while `data` still is the
+        // poster: once the file arrives those bytes are the MP4.
+        let still = if is_video {
+            media.data_is_preview
+        } else {
+            !media.data_is_preview
+        };
+        let image = (!media.data.is_empty() && still)
             .then(|| app.get_decoded_image(&message.id, media, cx))
             .flatten();
         let frame = app.video_current_frame(&message.id);
+        let video = is_video.then(|| {
+            let (elapsed, length) = app.video_timing(&message.id).unwrap_or_default();
+            crate::components::ViewerVideo {
+                state: app
+                    .video_player_state(&message.id)
+                    .unwrap_or(crate::video::VideoPlayerState::Idle),
+                elapsed_secs: u32::try_from(elapsed.as_secs()).unwrap_or(u32::MAX),
+                length_secs: length
+                    .map(|length| u32::try_from(length.as_secs()).unwrap_or(u32::MAX))
+                    .or(media.duration_secs),
+            }
+        });
         let author = if message.is_from_me {
             SharedString::from(crate::tr!(You))
         } else {
@@ -170,6 +190,7 @@ pub fn render_connected_view(
                     message,
                     image,
                     frame,
+                    video,
                     is_loading,
                     author,
                 },

@@ -1278,6 +1278,15 @@ impl WhatsAppApp {
     pub fn video_player_state(&self, message_id: &str) -> Option<VideoPlayerState> {
         self.video_players.get(message_id).map(|p| p.state())
     }
+    /// Where a loaded video is and how long it runs, for the viewer's clock.
+    pub fn video_timing(
+        &self,
+        message_id: &str,
+    ) -> Option<(std::time::Duration, Option<std::time::Duration>)> {
+        self.video_players
+            .get(message_id)
+            .map(|player| (player.current_time(), player.duration()))
+    }
     /// Get current video frame for a message (if playing).
     /// Returns an `Arc<RenderImage>` — YUV→RGBA was already converted when
     /// the frame was decoded (same pattern Zed uses on Linux).

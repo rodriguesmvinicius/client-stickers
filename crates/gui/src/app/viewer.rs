@@ -246,16 +246,30 @@ impl MediaViewer {
 /// when the viewer reaches that picture, keeping the rest of the album lazy.
 /// Missing references report an error in place and remain navigable/retryable.
 ///
-/// Pictures only. A video's bytes are an encoded stream, and the viewer has
-/// no decoder of its own — opening one would show the "cannot be shown"
-/// placeholder for something it had just called viewable. Video plays in its
-/// bubble until the viewer grows a player.
+/// A video counts when it can be fetched: the viewer plays it through the
+/// same player the bubble used to, showing its frames instead of a still, and
+/// the player is what downloads it. One with nothing to fetch it by has no
+/// stream to play, only a poster, and stays in its bubble.
 fn is_viewable(message: &ChatMessage) -> bool {
     message.media.as_ref().is_some_and(|media| {
         !message.revoked
-            && media.media_type == MediaType::Image
-            && (media.cache_key.is_some() || (!media.data.is_empty() && !media.data_is_preview))
+            && match media.media_type {
+                MediaType::Image => {
+                    media.cache_key.is_some() || (!media.data.is_empty() && !media.data_is_preview)
+                }
+                MediaType::Video => media.downloadable.is_some(),
+                _ => false,
+            }
     })
+}
+
+/// Whether the message on screen in the viewer is a video, which is what
+/// decides that it plays rather than sits there.
+pub(super) fn is_video(message: &ChatMessage) -> bool {
+    message
+        .media
+        .as_ref()
+        .is_some_and(|media| media.media_type == MediaType::Video)
 }
 
 #[cfg(test)]
@@ -288,11 +302,30 @@ mod tests {
 
     /// Deliberately not `MediaContent::video`, which would call its bytes a
     /// poster and so a preview: what the gate above has to be shown refusing
-    /// is the *kind*, on media that passes every other test it applies.
+    /// is a video with no stream to fetch, on media that passes every other
+    /// test it applies.
     fn video() -> MediaContent {
         MediaContent {
             media_type: MediaType::Video,
             ..image(false, true)
+        }
+    }
+
+    fn fetchable_video() -> MediaContent {
+        MediaContent {
+            downloadable: Some(oxidezap_core::DownloadableMedia {
+                direct_path: "/synthetic-clip".into(),
+                media_key: vec![],
+                file_enc_sha256: vec![],
+                file_sha256: vec![],
+                static_url: None,
+                is_thumbnail: false,
+                file_length: 0,
+                mime_type: "video/mp4".into(),
+                duration_secs: Some(9),
+                download_type: wacore::download::MediaType::Video,
+            }),
+            ..video()
         }
     }
 
@@ -333,7 +366,18 @@ mod tests {
     }
 
     #[test]
-    fn a_video_is_not_something_the_viewer_can_show() {
+    fn a_video_that_can_be_fetched_opens_and_is_walked_to() {
+        let mut messages = history();
+        messages.push(message("film", Some(fetchable_video())));
+        let viewer = MediaViewer::open("chat".into(), "film", &messages).expect("playable");
+        assert_eq!(
+            viewer.items,
+            vec!["photo-1".to_string(), "photo-2".into(), "film".into()]
+        );
+    }
+
+    #[test]
+    fn a_video_with_nothing_to_fetch_is_not_something_the_viewer_can_show() {
         assert!(MediaViewer::open("chat".into(), "clip", &history()).is_none());
         let viewer = MediaViewer::open("chat".into(), "photo-1", &history()).expect("viewable");
         assert!(

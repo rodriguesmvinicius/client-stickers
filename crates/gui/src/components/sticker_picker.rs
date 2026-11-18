@@ -71,7 +71,18 @@ pub(super) struct StickerPicker {
     resynced: bool,
     scroll: UniformListScrollHandle,
     language: crate::i18n::Language,
+    /// The sticker under the pointer, the one cell that animates.
+    hovered: Option<String>,
+    /// Cells drawn lately, oldest first. A favorite scrolled out of this
+    /// window gives back its decoded pixels and keeps only its file, so
+    /// browsing a few hundred favorites holds a screenful of pictures rather
+    /// than all of them.
+    drawn: VecDeque<String>,
 }
+
+/// How many cells keep their decoded pictures: the grid on screen and a
+/// screenful either side of it.
+const DRAWN_KEPT: usize = COLUMNS * 12;
 
 impl EventEmitter<StickerPicked> for StickerPicker {}
 
@@ -114,7 +125,41 @@ impl StickerPicker {
             resynced: false,
             scroll: UniformListScrollHandle::new(),
             language: crate::i18n::Language::current(),
+            hovered: None,
+            drawn: VecDeque::new(),
         }
+    }
+
+    /// A cell was drawn: it moves to the back of the window, and the cell
+    /// that falls out of the front lets go of its decode.
+    fn note_drawn(&mut self, filehash: &str) {
+        if let Some(at) = self.drawn.iter().position(|hash| hash == filehash) {
+            self.drawn.remove(at);
+        }
+        self.drawn.push_back(filehash.to_string());
+        while self.drawn.len() > DRAWN_KEPT {
+            if let Some(gone) = self.drawn.pop_front()
+                && let Some(Thumb::Ready(image)) = self.thumbs.get(&gone)
+            {
+                image.release_decodes();
+            }
+        }
+    }
+
+    fn hover(&mut self, filehash: &str, hovered: bool, cx: &mut gpui::Context<Self>) {
+        if hovered {
+            self.hovered = Some(filehash.to_string());
+        } else if self.hovered.as_deref() == Some(filehash) {
+            self.hovered = None;
+            // The animation was for the pointer; the cell goes back to its
+            // still, and its frames go with it.
+            if let Some(Thumb::Ready(image)) = self.thumbs.get(filehash) {
+                image.release(crate::retained_image::Fit::Fitted);
+            }
+        } else {
+            return;
+        }
+        cx.notify();
     }
 
     pub fn focus_handle(&self, cx: &gpui::App) -> gpui::FocusHandle {
@@ -468,10 +513,17 @@ impl StickerPicker {
 
     fn thumb_element(&self, filehash: &str, size: gpui::Pixels) -> gpui::AnyElement {
         match self.thumbs.get(filehash) {
-            Some(Thumb::Ready(image)) => img(image.source(true))
-                .size(size)
-                .object_fit(gpui::ObjectFit::Contain)
-                .into_any_element(),
+            // A still for the grid and the frames for the one under the
+            // pointer: every favorite animating at once is dozens of frames
+            // each, and the grid is browsed rather than watched.
+            Some(Thumb::Ready(image)) => img(if self.hovered.as_deref() == Some(filehash) {
+                image.fitted(true)
+            } else {
+                image.still(true)
+            })
+            .size(size)
+            .object_fit(gpui::ObjectFit::Contain)
+            .into_any_element(),
             Some(Thumb::Failed(why)) => {
                 let why = why.clone();
                 div()
@@ -611,6 +663,7 @@ impl Render for StickerPicker {
                             .collect();
                         for hash in rows.iter().flatten() {
                             this.want(hash);
+                            this.note_drawn(hash);
                         }
                         this.pump(cx);
                         let tagged: HashSet<&str> = this
@@ -624,6 +677,7 @@ impl Render for StickerPicker {
                                 div().flex().h(cell).children(row.iter().map(|hash| {
                                     let send = hash.clone();
                                     let edit = hash.clone();
+                                    let pointed = hash.clone();
                                     let selected = this.editing.as_deref() == Some(hash.as_str());
                                     div()
                                         .id(SharedString::from(format!("sticker-{hash}")))
@@ -642,6 +696,11 @@ impl Render for StickerPicker {
                                             el.border_b_2().border_color(cx.theme().border)
                                         })
                                         .child(this.thumb_element(hash, cell * 0.85))
+                                        .on_hover(cx.listener(
+                                            move |this, hovered: &bool, _, cx| {
+                                                this.hover(&pointed, *hovered, cx);
+                                            },
+                                        ))
                                         .on_click(cx.listener(move |_, _, _, cx| {
                                             cx.emit(StickerPicked(send.clone()));
                                         }))

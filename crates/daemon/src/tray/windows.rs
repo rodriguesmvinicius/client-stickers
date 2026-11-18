@@ -203,10 +203,12 @@ fn apply(tray: &TrayIcon, state: &TrayState) {
     }
 }
 
-/// The shared dot, in this platform's icon type.
+/// The application's icon badged with the state, in this platform's icon
+/// type: a notification area full of bare dots says nothing about whose dot
+/// this one is.
 fn icon_for(state: &TrayState) -> tray_icon::Icon {
-    use super::dot::{SIDE, colour_for, dot};
+    use super::dot::{SIDE, badged_app_icon};
 
-    tray_icon::Icon::from_rgba(dot(colour_for(state)), SIDE, SIDE)
+    tray_icon::Icon::from_rgba(badged_app_icon(state), SIDE, SIDE)
         .expect("the tray icon's bytes match its dimensions")
 }

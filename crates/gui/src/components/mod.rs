@@ -36,7 +36,7 @@ pub use conversation_search::render_conversation_search;
 pub use empty_state::EmptyState;
 pub use icons::ProductIcon;
 pub use input_area_view::{InputAreaEvent, InputAreaView, ReplyDraft};
-pub use media_viewer::{ViewerProps, render_media_viewer};
+pub use media_viewer::{ViewerProps, ViewerVideo, render_media_viewer};
 pub use message_bubble::render_message_bubble;
 pub use message_list::{new_timeline_state, render_message_list};
 pub use nav_rail::render_nav_rail;

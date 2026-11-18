@@ -197,6 +197,11 @@ impl VideoPlayer {
         }
     }
 
+    /// How long the clip runs, once it has been loaded.
+    pub fn duration(&self) -> Option<Duration> {
+        self.decoder.as_ref().map(|decoder| decoder.duration())
+    }
+
     pub fn current_time(&self) -> Duration {
         self.playback_start
             .map(|start| start.elapsed())

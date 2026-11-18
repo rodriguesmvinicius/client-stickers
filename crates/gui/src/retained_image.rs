@@ -17,9 +17,35 @@ use gpui::{
 #[derive(Clone)]
 pub(crate) struct RetainedImage(Rc<Inner>);
 
+/// How much of the picture a decode keeps.
+///
+/// A bubble draws a photo a few hundred pixels across, and a phone photo
+/// decodes to tens of megabytes of RGBA at its own size — kept for as long
+/// as the bubble is cached, and uploaded to the GPU atlas whole. So the
+/// surfaces that draw small ask for a decode at the size they draw, and only
+/// the viewer, which shows a picture at the size of the window, decodes it
+/// all.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub(crate) enum Fit {
+    /// Every pixel and every frame.
+    Full,
+    /// Scaled down to [`PICTURE_SIDE`] or [`STICKER_SIDE`], every frame.
+    Fitted,
+    /// Scaled the same, first frame only: a grid of animated stickers is
+    /// dozens of frames each, and a grid is browsed rather than watched.
+    Still,
+}
+
+/// The longest side a picture in a bubble is decoded to. Twice the widest a
+/// bubble draws one at, so a high-density screen still gets a pixel per
+/// pixel.
+pub(crate) const PICTURE_SIDE: u32 = 720;
+/// The same for a sticker, which a bubble and the picker draw smaller.
+pub(crate) const STICKER_SIDE: u32 = 384;
+
 struct Inner {
     image: Arc<Image>,
-    assets: RefCell<HashMap<bool, Entity<Decoded>>>,
+    assets: RefCell<HashMap<(bool, Fit), Entity<Decoded>>>,
 }
 
 struct Decoded {
@@ -30,7 +56,7 @@ struct Decoded {
 // GPUI Image IDs are content-derived. Independent messages with identical
 // bytes must share retirement ownership as well as the global asset key.
 #[derive(Default)]
-struct Assets(HashMap<(u64, bool), WeakEntity<Decoded>>);
+struct Assets(HashMap<(u64, bool, Fit), WeakEntity<Decoded>>);
 
 impl Global for Assets {}
 
@@ -38,6 +64,7 @@ impl Global for Assets {}
 struct Source {
     image: Arc<Image>,
     sticker: bool,
+    fit: Fit,
 }
 
 struct Decoder;
@@ -49,11 +76,25 @@ impl Asset for Decoder {
     fn load(source: Source, cx: &mut App) -> impl Future<Output = Self::Output> + Send + 'static {
         let renderer = cx.svg_renderer();
         async move {
-            if source.sticker {
-                crate::components::message_bubble::decode_sticker(&source.image.bytes)
-                    .map_err(Into::into)
-            } else {
-                source.image.to_image_data(renderer).map_err(Into::into)
+            match (source.sticker, source.fit) {
+                (true, Fit::Full) => {
+                    crate::components::message_bubble::decode_sticker(&source.image.bytes)
+                        .map_err(Into::into)
+                }
+                (true, fit) => crate::components::message_bubble::decode_sticker_fitted(
+                    &source.image.bytes,
+                    STICKER_SIDE,
+                    fit == Fit::Still,
+                )
+                .map_err(Into::into),
+                (false, Fit::Full) => source.image.to_image_data(renderer).map_err(Into::into),
+                (false, _) => match decode_fitted(&source.image, PICTURE_SIDE) {
+                    Some(decoded) => decoded.map_err(Into::into),
+                    // A format with frames or no pixels of its own (GIF, SVG)
+                    // keeps GPUI's own decode: scaling would lose the one or
+                    // has nothing to scale in the other.
+                    None => source.image.to_image_data(renderer).map_err(Into::into),
+                },
             }
         }
     }
@@ -68,12 +109,13 @@ impl std::ops::Deref for RetainedImage {
 }
 
 impl RetainedImage {
+    /// The decode a surface asked for, whichever fit it asked at.
     #[cfg(test)]
     pub(crate) fn decoded(&self, sticker: bool, cx: &App) -> Option<Arc<RenderImage>> {
-        self.0
-            .assets
-            .borrow()
-            .get(&sticker)?
+        let assets = self.0.assets.borrow();
+        [Fit::Full, Fit::Fitted, Fit::Still]
+            .into_iter()
+            .find_map(|fit| assets.get(&(sticker, fit)))?
             .read(cx)
             .output
             .clone()
@@ -86,16 +128,55 @@ impl RetainedImage {
         }))
     }
 
+    /// Every pixel: for a surface that shows the picture at full size.
     pub(crate) fn source(&self, sticker: bool) -> ImageSource {
+        self.decoded_as(sticker, Fit::Full)
+    }
+
+    /// Scaled to what a bubble or a grid can show. See [`Fit`].
+    pub(crate) fn fitted(&self, sticker: bool) -> ImageSource {
+        self.decoded_as(sticker, Fit::Fitted)
+    }
+
+    /// Scaled, and only the first frame. See [`Fit::Still`].
+    pub(crate) fn still(&self, sticker: bool) -> ImageSource {
+        self.decoded_as(sticker, Fit::Still)
+    }
+
+    /// Let go of the full-size decode, keeping the small ones.
+    ///
+    /// The viewer asks for one picture at a time at full size; this is what
+    /// it calls on the one it has left, so walking an album does not leave
+    /// every photo in it decoded whole for as long as the bubbles are cached.
+    /// A surface still painting it keeps its own lease until it repaints.
+    pub(crate) fn release_full(&self) {
+        self.release(Fit::Full);
+    }
+
+    /// Let go of the decodes at one fit, keeping the others.
+    pub(crate) fn release(&self, fit: Fit) {
+        self.0
+            .assets
+            .borrow_mut()
+            .retain(|(_, held), _| *held != fit);
+    }
+
+    /// Let go of every decode, keeping only the encoded bytes: for an owner
+    /// that holds many images but draws a few at a time.
+    pub(crate) fn release_decodes(&self) {
+        self.0.assets.borrow_mut().clear();
+    }
+
+    fn decoded_as(&self, sticker: bool, fit: Fit) -> ImageSource {
         let owner = self.clone();
         ImageSource::from(move |window: &mut gpui::Window, cx: &mut App| {
             let asset = owner
                 .0
                 .assets
                 .borrow_mut()
-                .entry(sticker)
+                .entry((sticker, fit))
                 .or_insert_with(|| {
-                    let key = (owner.id, sticker);
+                    let key = (owner.id, sticker, fit);
                     if let Some(asset) = cx
                         .default_global::<Assets>()
                         .0
@@ -109,7 +190,7 @@ impl RetainedImage {
                             let source = asset.source.clone();
                             let output = asset.output.clone();
                             cx.defer(move |cx| {
-                                let key = (source.image.id, source.sticker);
+                                let key = (source.image.id, source.sticker, source.fit);
                                 let assets = cx.default_global::<Assets>();
                                 // A new owner may acquire this content between
                                 // release and this deferred retirement.
@@ -128,6 +209,7 @@ impl RetainedImage {
                             source: Source {
                                 image: owner.0.image.clone(),
                                 sticker,
+                                fit,
                             },
                             output: None,
                         }
@@ -143,10 +225,13 @@ impl RetainedImage {
             // ImageSource. Keep the asset with that element state as well.
             window.with_global_id(
                 ElementId::NamedInteger(
-                    if sticker {
-                        "sticker-asset"
-                    } else {
-                        "image-asset"
+                    match (sticker, fit) {
+                        (true, Fit::Full) => "sticker-asset",
+                        (true, Fit::Fitted) => "sticker-fitted-asset",
+                        (true, Fit::Still) => "sticker-still-asset",
+                        (false, Fit::Full) => "image-asset",
+                        (false, Fit::Fitted) => "image-fitted-asset",
+                        (false, Fit::Still) => "image-still-asset",
                     }
                     .into(),
                     owner.id,
@@ -166,6 +251,54 @@ impl RetainedImage {
             })
         })
     }
+}
+
+/// Decode a still picture no larger than `side` on its longest edge, in the
+/// layout GPUI draws (BGRA), honouring the EXIF orientation as GPUI's own
+/// decode does. `None` for a format this does not scale; the caller falls
+/// back to GPUI's decode.
+fn decode_fitted(image: &Image, side: u32) -> Option<anyhow::Result<Arc<RenderImage>>> {
+    let format = match image.format {
+        gpui::ImageFormat::Png => image::ImageFormat::Png,
+        gpui::ImageFormat::Jpeg => image::ImageFormat::Jpeg,
+        gpui::ImageFormat::Webp => image::ImageFormat::WebP,
+        gpui::ImageFormat::Bmp => image::ImageFormat::Bmp,
+        gpui::ImageFormat::Tiff => image::ImageFormat::Tiff,
+        _ => return None,
+    };
+    Some((|| {
+        use image::ImageDecoder as _;
+        let mut decoder =
+            image::ImageReader::with_format(std::io::Cursor::new(&image.bytes), format)
+                .into_decoder()?;
+        let orientation = decoder.orientation()?;
+        let mut picture = image::DynamicImage::from_decoder(decoder)?;
+        picture.apply_orientation(orientation);
+        let (width, height) = (picture.width(), picture.height());
+        if width.max(height) > side {
+            let (w, h) = fitted_size(width, height, side);
+            picture = picture.resize_exact(w, h, image::imageops::FilterType::Triangle);
+        }
+        let mut pixels = picture.into_rgba8();
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+        Ok(Arc::new(RenderImage::new(smallvec::smallvec![
+            image::Frame::new(pixels)
+        ])))
+    })())
+}
+
+/// `width`×`height` scaled to fit `side` on its longest edge, never below a
+/// pixel.
+pub(crate) fn fitted_size(width: u32, height: u32, side: u32) -> (u32, u32) {
+    let longest = width.max(height).max(1);
+    if longest <= side {
+        return (width.max(1), height.max(1));
+    }
+    let scale = f64::from(side) / f64::from(longest);
+    let scaled = |n: u32| ((f64::from(n) * scale).round() as u32).max(1);
+    (scaled(width), scaled(height))
 }
 
 #[cfg(test)]
@@ -224,7 +357,7 @@ mod tests {
         let mut window = gpui::VisualTestContext::from_window(handle.into(), cx);
         window.run_until_parked();
         let decoded = window.read(|cx| {
-            owner.0.assets.borrow()[&false]
+            owner.0.assets.borrow()[&(false, Fit::Full)]
                 .read(cx)
                 .output
                 .clone()
@@ -238,6 +371,7 @@ mod tests {
         let source = Source {
             image: owner.0.image.clone(),
             sticker: false,
+            fit: Fit::Full,
         };
         drop(decoded);
 
@@ -259,7 +393,7 @@ mod tests {
         assert!(window.read(|cx| {
             Arc::ptr_eq(
                 &weak.upgrade().unwrap(),
-                owner.0.assets.borrow()[&false]
+                owner.0.assets.borrow()[&(false, Fit::Full)]
                     .read(cx)
                     .output
                     .as_ref()
@@ -300,6 +434,7 @@ mod tests {
         let source = Source {
             image: owner.0.image.clone(),
             sticker: false,
+            fit: Fit::Full,
         };
         let handle = cx.open_window(gpui::size(gpui::px(40.), gpui::px(40.)), |_, _| {
             View(Some(owner.source(false)))
@@ -459,6 +594,7 @@ mod tests {
             let source = Source {
                 image: first.0.image.clone(),
                 sticker,
+                fit: Fit::Full,
             };
             let mut probe = RenderImage::new(smallvec::smallvec![image::Frame::new(
                 image::RgbaImage::new(1, 1)
@@ -615,5 +751,22 @@ mod tests {
             });
             window.run_until_parked();
         }
+    }
+
+    #[test]
+    fn a_large_picture_is_fitted_to_its_longest_side_and_a_small_one_kept() {
+        assert_eq!(fitted_size(4000, 3000, 720), (720, 540));
+        assert_eq!(fitted_size(1080, 1920, 720), (405, 720));
+        assert_eq!(fitted_size(300, 200, 720), (300, 200));
+        assert_eq!(fitted_size(10_000, 1, 720), (720, 1));
+    }
+
+    #[test]
+    fn a_fitted_decode_is_no_larger_than_its_side() {
+        let decoded = decode_fitted(&image(4), PICTURE_SIDE)
+            .expect("png scales")
+            .expect("decodes");
+        let size = decoded.size(0);
+        assert_eq!((size.width.0, size.height.0), (720, 720));
     }
 }

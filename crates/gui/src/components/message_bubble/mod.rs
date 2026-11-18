@@ -30,7 +30,7 @@ pub use audio::SPEEDS;
 pub use system::render_encryption_notice;
 
 use media::{MediaProps, render_media_content};
-pub(crate) use media::{decode_sticker, sticker_payload_is_valid};
+pub(crate) use media::{decode_sticker, decode_sticker_fitted, sticker_payload_is_valid};
 use poll::render_poll;
 use quote::render_quote;
 use reactions::{render_hover_actions, render_reaction_picker, render_reactions};
