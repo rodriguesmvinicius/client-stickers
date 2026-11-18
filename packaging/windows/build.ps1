@@ -57,7 +57,7 @@ Write-Host "==> portable: $zip"
 
 if ($makensis) {
     $setup = Join-Path $dist "$name-instalador.exe"
-    & $makensis -V2 "-DVERSION=$Version" "-DSTAGE=$stage" "-DOUTFILE=$setup" "packaging\windows\installer.nsi"
+    & $makensis -V2 "-DVERSION=$Version" "-DSTAGE=$stage" "-DOUTFILE=$setup" (Resolve-Path "packaging\windows\installer.nsi").Path
     if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
     Write-Host "==> instalador: $setup"
 } else {

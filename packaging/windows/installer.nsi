@@ -26,6 +26,10 @@ SetCompressor /SOLID lzma
   !define OUTFILE "oxidezap-${VERSION}-windows-x86_64-setup.exe"
 !endif
 
+; makensis runs from this script's folder (unless given /NOCD), so paths
+; into the repository are relative to it, whatever folder it was called from.
+!define ICON "../../web/icons/favicon.ico"
+
 !define APPNAME "oxidezap"
 !define PUBLISHER "oxidezap (unofficial WhatsApp client)"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\oxidezap-stickers"
@@ -34,14 +38,14 @@ Name "${APPNAME} ${VERSION}"
 OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\oxidezap"
 InstallDirRegKey HKCU "Software\oxidezap-stickers" "InstallDir"
-Icon "${__FILEDIR__}/../../web/icons/favicon.ico"
-UninstallIcon "${__FILEDIR__}/../../web/icons/favicon.ico"
+Icon "${ICON}"
+UninstallIcon "${ICON}"
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 
-!define MUI_ICON "${__FILEDIR__}/../../web/icons/favicon.ico"
-!define MUI_UNICON "${__FILEDIR__}/../../web/icons/favicon.ico"
+!define MUI_ICON "${ICON}"
+!define MUI_UNICON "${ICON}"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\oxidezap.exe"
 
@@ -90,7 +94,7 @@ Section "$(SecApp)" SecMain
   File "${STAGE}/oxidezapd.exe"
   File "${STAGE}/oxidezap-cli.exe"
   File "${STAGE}/NotoColorEmoji-OFL.txt"
-  File "/oname=oxidezap.ico" "${__FILEDIR__}/../../web/icons/favicon.ico"
+  File "/oname=oxidezap.ico" "${ICON}"
 
   CreateDirectory "$SMPROGRAMS\oxidezap"
   CreateShortcut "$SMPROGRAMS\oxidezap\oxidezap.lnk" "$INSTDIR\oxidezap.exe" "" "$INSTDIR\oxidezap.ico"
