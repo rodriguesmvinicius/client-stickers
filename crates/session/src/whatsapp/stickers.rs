@@ -114,10 +114,16 @@ impl WhatsAppClient {
                 // Already gone: what was asked for is true.
                 return Ok(());
             };
+            // The listed media carries no plaintext digest (see the store's
+            // `favorite_of`); the change is keyed by it, so put it back.
+            let mut media = sticker.media;
+            media.file_sha256 = oxidezap_core::base64::decode(&filehash)
+                .filter(|hash| hash.len() == 32)
+                .ok_or_else(|| "that favorite's key is not a file hash".to_string())?;
             apply_favorite_change(
                 &live,
                 &StickerFavorite {
-                    media: sticker.media,
+                    media,
                     width: sticker.width,
                     height: sticker.height,
                     is_animated: sticker.is_animated,

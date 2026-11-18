@@ -44,7 +44,9 @@ enum Thumb {
     Queued,
     Loading,
     Ready(RetainedImage),
-    Failed,
+    /// Why, shown on hover: a favorite whose file is gone from WhatsApp's
+    /// servers and one the connection dropped are different problems.
+    Failed(SharedString),
 }
 
 pub(super) struct StickerPicker {
@@ -242,11 +244,12 @@ impl StickerPicker {
                         Ok(Ok(bytes)) if !bytes.is_empty() => Thumb::Ready(RetainedImage::new(
                             gpui::Image::from_bytes(gpui::ImageFormat::Webp, bytes.to_vec()),
                         )),
+                        Ok(Ok(_)) => Thumb::Failed("the file came back empty".into()),
                         Ok(Err(failure)) => {
-                            log::debug!("sticker picture unavailable: {}", failure.detail);
-                            Thumb::Failed
+                            log::warn!("sticker picture unavailable: {}", failure.detail);
+                            Thumb::Failed(failure.detail.clone().into())
                         }
-                        _ => Thumb::Failed,
+                        Err(_) => Thumb::Failed("the connection to the service ended".into()),
                     };
                     this.thumbs.insert(hash, thumb);
                     this.pump(cx);
@@ -417,13 +420,20 @@ impl StickerPicker {
                 .size(size)
                 .object_fit(gpui::ObjectFit::Contain)
                 .into_any_element(),
-            Some(Thumb::Failed) => div()
-                .size(size)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child("⚠")
-                .into_any_element(),
+            Some(Thumb::Failed(why)) => {
+                let why = why.clone();
+                div()
+                    .id(SharedString::from(format!("sticker-failed-{filehash}")))
+                    .size(size)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child("⚠")
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(why.clone()).build(window, cx)
+                    })
+                    .into_any_element()
+            }
             _ => div().size(size).into_any_element(),
         }
     }
@@ -449,6 +459,11 @@ impl Render for StickerPicker {
         let cell = metrics.icon_button() * 2.;
         let editing = self.editing.clone();
         let count = self.favorites.len();
+        let failed = self
+            .thumbs
+            .values()
+            .filter(|thumb| matches!(thumb, Thumb::Failed(_)))
+            .count();
         let searching = !self.search.read(cx).text().to_string().trim().is_empty();
         div()
             .flex()
@@ -493,6 +508,14 @@ impl Render for StickerPicker {
                     ),
             )
             .child(Input::new(&self.search).w_full())
+            .when(failed > 0, |panel| {
+                panel.child(
+                    div()
+                        .text_size(metrics.text_micro())
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!("{failed} {}", crate::tr!(StickerPicturesFailed))),
+                )
+            })
             .children(self.status.clone().map(|status| {
                 div()
                     .text_size(metrics.text_micro())

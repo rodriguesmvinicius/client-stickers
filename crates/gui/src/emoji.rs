@@ -6,6 +6,29 @@ use gpui_component::input::{InlineToken, InputContent};
 use unicode_segmentation::UnicodeSegmentation as _;
 
 pub(crate) const FAMILY: &str = "OxideZap Emoji";
+
+/// The family emoji *text* is set in: message bodies, reaction chips, the
+/// window's fallback.
+///
+/// The bundled face everywhere but Windows. Its artwork is sbix (PNG), and
+/// gpui's DirectWrite rasterizer draws only COLR color glyphs (its own
+/// `todo: support formats other than COLR`): an sbix glyph is recognised as
+/// color, then drawn as nothing, so every reaction chip came out empty. There
+/// the system's Segoe UI Emoji, which is COLR, sets the text instead. Controls
+/// that draw emoji as pictures ([`picture`]) still use the bundled artwork.
+pub(crate) fn text_family() -> &'static str {
+    imp::TEXT_FAMILY
+}
+
+#[cfg(target_os = "windows")]
+mod imp {
+    pub(super) const TEXT_FAMILY: &str = "Segoe UI Emoji";
+}
+
+#[cfg(not(target_os = "windows"))]
+mod imp {
+    pub(super) const TEXT_FAMILY: &str = super::FAMILY;
+}
 /// Match the bundled artwork, rather than offering newer, unsupported glyphs.
 pub(crate) const VERSION: emojis::EmojiVersion = emojis::EmojiVersion::new(17, 0);
 

@@ -43,15 +43,20 @@ fn favorite_of(row: FavoriteRow) -> Option<FavoriteSticker> {
         is_animated,
         favorited_at_ms,
     ) = row;
-    // The hash is the plaintext digest the downloader verifies against; a
-    // key that does not decode to one names nothing that can be checked.
-    let file_sha256 = oxidezap_core::base64::decode(&filehash).filter(|h| h.len() == 32)?;
+    // A key that is not a 32-byte digest names no sticker WhatsApp would.
+    oxidezap_core::base64::decode(&filehash).filter(|h| h.len() == 32)?;
     Some(FavoriteSticker {
         media: DownloadableMedia {
             direct_path,
             media_key,
             file_enc_sha256,
-            file_sha256,
+            // Left out on purpose. Nothing guarantees the favorite's key is
+            // the digest of the exact bytes at the recorded path, and a
+            // mismatch would make the downloader refuse a good file. The
+            // encrypted digest and the media key's HMAC still prove the bytes
+            // are the ones the phone recorded; the key is the identity, not
+            // the proof.
+            file_sha256: Vec::new(),
             static_url: None,
             is_thumbnail: false,
             file_length: u64::try_from(file_length).unwrap_or(0),
@@ -335,7 +340,9 @@ mod tests {
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].filehash, newer.filehash);
         assert_eq!(listed[1].tags, vec!["bravo", "gato"]);
-        assert_eq!(listed[1].media.file_sha256, vec![3; 32]);
+        // Verified by the encrypted digest and HMAC, not by the key.
+        assert!(listed[1].media.file_sha256.is_empty());
+        assert_eq!(listed[1].media.file_enc_sha256, vec![2; 32]);
         assert!(listed[1].matches("#ga #bra"));
         assert_eq!(chats.favorite_sticker_count().await.unwrap(), 2);
     }

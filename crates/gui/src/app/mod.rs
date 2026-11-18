@@ -4437,7 +4437,7 @@ impl Render for WhatsAppApp {
             .size_full()
             .map(|mut root| {
                 root.text_style().font_fallbacks = Some(gpui::FontFallbacks::from_fonts(vec![
-                    crate::emoji::FAMILY.into(),
+                    crate::emoji::text_family().into(),
                 ]));
                 root
             })

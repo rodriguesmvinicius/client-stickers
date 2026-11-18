@@ -313,7 +313,7 @@ fn render_with_links(
             highlights.push((start..end, style_for(emphasis, metrics)));
         }
         if is_emoji {
-            code.push((start..end, crate::emoji::FAMILY.into()));
+            code.push((start..end, crate::emoji::text_family().into()));
         } else if emphasis.code {
             code.push((start..end, mono.clone()));
         }

@@ -56,7 +56,7 @@ pub fn render_reactions(
                 .border_color(cx.theme().border)
                 .child(
                     div()
-                        .font_family(crate::emoji::FAMILY)
+                        .font_family(crate::emoji::text_family())
                         .text_size(metrics.text_small())
                         .child(emoji),
                 )
@@ -107,7 +107,7 @@ pub fn render_reaction_picker(
                 "quick-react-{message_id}-{emoji}"
             )))
             .ghost()
-            .font_family(crate::emoji::FAMILY)
+            .font_family(crate::emoji::text_family())
             .xsmall()
             .label(emoji)
             .tooltip(crate::tr!(react_emoji, emoji))
