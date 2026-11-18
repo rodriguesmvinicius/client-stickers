@@ -249,6 +249,25 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        // Answered under this id like a page: the picker is one window's
+        // popover, and its list is nobody else's business.
+        ClientRequest::Stickers(request) => {
+            let id = match addressed(id, "a sticker request needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            out_of_band(
+                hub,
+                commands,
+                id,
+                Action::Stickers {
+                    id,
+                    request: *request,
+                    answer_to: outbox.clone(),
+                },
+            )
+            .await
+        }
         ClientRequest::ForgetSession => acted(
             dispatch(
                 hub,

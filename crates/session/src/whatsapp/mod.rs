@@ -29,6 +29,7 @@ mod ops;
 mod profile;
 /// Sends a scriptable front end asks for, read from daemon-local paths.
 mod sends;
+mod stickers;
 
 /// Store rows read back as the chats a front end draws.
 mod history;
@@ -79,6 +80,7 @@ pub use ops::{
 pub use outgoing::OutgoingFile;
 pub use paging::ReadBoundary;
 pub use profile::ProfileView;
+pub use stickers::StickerFavorite;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

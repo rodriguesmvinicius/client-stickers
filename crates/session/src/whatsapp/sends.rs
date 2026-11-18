@@ -13,6 +13,7 @@ use whatsapp_rust::waproto::whatsapp as wa;
 
 use super::WhatsAppClient;
 use super::convert::quote_context;
+use super::stickers::StickerShape;
 use crate::exec::Task;
 
 /// The server-assigned id and the send's timestamp, for a script to key on.
@@ -288,56 +289,70 @@ impl WhatsAppClient {
             if data.is_empty() {
                 return Err(format!("{file_path} is empty"));
             }
-            let client = &live.client;
-            let upload = match client
-                .upload(
-                    data,
-                    whatsapp_rust::wacore::download::MediaType::Sticker,
-                    Default::default(),
-                )
-                .await
-            {
-                Ok(response) => response,
-                Err(e) => return Err(e.to_string()),
-            };
-            let message = {
-                let mut constructed: wa::Message = Default::default();
-                constructed.sticker_message = whatsapp_rust::buffa::MessageField::some({
-                    let mut constructed: wa::message::StickerMessage = Default::default();
-                    constructed.url = Some(upload.url);
-                    constructed.direct_path = Some(upload.direct_path);
-                    constructed.media_key = Some(upload.media_key.to_vec());
-                    constructed.file_sha256 = Some(upload.file_sha256.to_vec());
-                    constructed.file_enc_sha256 = Some(upload.file_enc_sha256.to_vec());
-                    constructed.file_length = Some(upload.file_length);
-                    constructed.mimetype = Some("image/webp".to_string());
-                    constructed
-                });
-                constructed
-            };
-            let msg_id = client.generate_message_id();
-            super::record_outgoing(
-                &live.chat_store,
-                &chat,
-                msg_id.as_str(),
-                &message,
-                &live.resolve_chat_names,
-            )?;
-            let options = whatsapp_rust::SendOptions::default().with_message_id(msg_id.clone());
-            match client
-                .send(whatsapp_rust::SendRequest::new(&chat, message).with_options(options))
-                .await
-            {
-                Ok(_) => Ok((
-                    msg_id.into_string(),
-                    whatsapp_rust::wacore::time::now_millis(),
-                )),
-                Err(e) => {
-                    super::mark_send_failed(&live.chat_store, &chat, msg_id.as_str());
-                    Err(e.to_string())
-                }
-            }
+            send_sticker_bytes(&live, &chat, data, StickerShape::default()).await
         })
+    }
+}
+
+/// Upload a WebP sticker, record it as this account's outgoing message, and
+/// send it. Shared by the CLI's path send and the picker's favorites.
+pub(super) async fn send_sticker_bytes(
+    live: &super::Session,
+    chat: &Jid,
+    data: Vec<u8>,
+    shape: StickerShape,
+) -> Result<SentReceipt, String> {
+    let client = &live.client;
+    let upload = match client
+        .upload(
+            data,
+            whatsapp_rust::wacore::download::MediaType::Sticker,
+            Default::default(),
+        )
+        .await
+    {
+        Ok(response) => response,
+        Err(e) => return Err(e.to_string()),
+    };
+    let message = {
+        let mut constructed: wa::Message = Default::default();
+        constructed.sticker_message = whatsapp_rust::buffa::MessageField::some({
+            let mut constructed: wa::message::StickerMessage = Default::default();
+            constructed.url = Some(upload.url);
+            constructed.direct_path = Some(upload.direct_path);
+            constructed.media_key = Some(upload.media_key.to_vec());
+            constructed.file_sha256 = Some(upload.file_sha256.to_vec());
+            constructed.file_enc_sha256 = Some(upload.file_enc_sha256.to_vec());
+            constructed.file_length = Some(upload.file_length);
+            constructed.mimetype = Some("image/webp".to_string());
+            constructed.width = shape.width;
+            constructed.height = shape.height;
+            constructed.is_animated = shape.is_animated.then_some(true);
+            constructed
+        });
+        constructed
+    };
+    let msg_id = client.generate_message_id();
+    super::record_outgoing(
+        &live.chat_store,
+        chat,
+        msg_id.as_str(),
+        &message,
+        &live.resolve_chat_names,
+    )?;
+    let options = whatsapp_rust::SendOptions::default().with_message_id(msg_id.clone());
+    match client
+        .send(whatsapp_rust::SendRequest::new(chat, message).with_options(options))
+        .await
+    {
+        Ok(_) => Ok((
+            msg_id.into_string(),
+            whatsapp_rust::wacore::time::now_millis(),
+        )),
+        Err(e) => {
+            super::mark_send_failed(&live.chat_store, chat, msg_id.as_str());
+            Err(e.to_string())
+        }
     }
 }
 

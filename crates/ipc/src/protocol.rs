@@ -425,6 +425,13 @@ pub enum DaemonMessage {
         id: RequestId,
         result: Result<Box<CallDeviceReply>, String>,
     },
+    /// Favorite stickers, answering [`ClientRequest::Stickers`] to the front
+    /// end that asked. Addressed rather than published: the picker is one
+    /// window's popover, and another window has no use for its list.
+    Stickers {
+        id: RequestId,
+        result: Result<Box<StickerReply>, String>,
+    },
     /// What this account occupies on disk, answering
     /// [`ClientRequest::StorageUsage`].
     Storage {
@@ -1037,6 +1044,9 @@ pub enum ClientRequest {
     Typing(Typing),
     Call(CallAction),
     CallDevices(Box<CallDeviceAction>),
+    /// Favorite stickers and their hashtags. Answered with
+    /// [`DaemonMessage::Stickers`] under the request's id.
+    Stickers(Box<StickerRequest>),
     /// Fetch media the daemon has not cached yet.
     ///
     /// The one request whose answer is neither a state change nor an
@@ -1327,6 +1337,53 @@ pub enum CallDeviceReply {
     Stopped {
         preview_id: oxidezap_core::CameraPreviewId,
     },
+}
+
+/// What to do with favorite stickers. See [`oxidezap_core::FavoriteSticker`]
+/// for what a favorite is and why its key is the file hash.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum StickerRequest {
+    /// The favorites the store holds, with their tags. A local read.
+    List,
+    /// Ask WhatsApp for the whole favorites collection again, then answer
+    /// like [`Self::List`]. The phone sends the full list only once, when a
+    /// device first links, and only changes after that; this is what repairs
+    /// a store that missed it.
+    Resync,
+    /// Favorite or unfavorite a sticker on every linked device, the phone
+    /// included. `media` is the sticker as a message carried it.
+    SetFavorite {
+        media: Box<oxidezap_core::DownloadableMedia>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        height: Option<u32>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_animated: bool,
+        favorite: bool,
+    },
+    /// Unfavorite by hash alone, for a favorite the picker already holds.
+    Unfavorite { filehash: String },
+    /// Replace the hashtags filed against a sticker on this device. An empty
+    /// list clears them.
+    SetTags { filehash: String, tags: Vec<String> },
+    /// Send a favorite into a chat.
+    Send { to: String, filehash: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum StickerReply {
+    /// The favorites, newest first.
+    ///
+    /// Named fields rather than a newtype, for the reason
+    /// [`DaemonMessage::InstalledPlugins`] gives.
+    Favorites {
+        stickers: Vec<oxidezap_core::FavoriteSticker>,
+    },
+    /// A change went through; nothing else to say.
+    Done,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -2363,6 +2420,75 @@ mod tests {
 #[cfg(test)]
 mod device_contract_tests {
     use super::*;
+    #[test]
+    fn sticker_requests_and_replies_survive_the_wire() {
+        // Through JSON rather than a literal: this crate names no `wacore`,
+        // and the download type is spelled on the wire by name anyway.
+        let media: oxidezap_core::DownloadableMedia = serde_json::from_value(serde_json::json!({
+            "direct_path": "/v/t62.15575-24/example",
+            "media_key": vec![1u8; 32],
+            "file_enc_sha256": vec![2u8; 32],
+            "file_sha256": vec![3u8; 32],
+            "file_length": 12_345,
+            "mime_type": "image/webp",
+            "duration_secs": null,
+            "download_type": "sticker",
+        }))
+        .unwrap();
+        for action in [
+            StickerRequest::List,
+            StickerRequest::Resync,
+            StickerRequest::SetFavorite {
+                media: Box::new(media.clone()),
+                width: Some(512),
+                height: Some(512),
+                is_animated: true,
+                favorite: true,
+            },
+            StickerRequest::Unfavorite {
+                filehash: "AwMD".into(),
+            },
+            StickerRequest::SetTags {
+                filehash: "AwMD".into(),
+                tags: vec!["gato".into(), "bravo".into()],
+            },
+            StickerRequest::Send {
+                to: "1@s.whatsapp.net".into(),
+                filehash: "AwMD".into(),
+            },
+        ] {
+            let request = ClientRequest::Stickers(Box::new(action));
+            let encoded = serde_json::to_string(&request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<ClientRequest>(&encoded).unwrap(),
+                request
+            );
+        }
+        for result in [
+            Ok(Box::new(StickerReply::Favorites {
+                stickers: vec![oxidezap_core::FavoriteSticker {
+                    filehash: "AwMD".into(),
+                    media,
+                    width: Some(512),
+                    height: None,
+                    is_animated: false,
+                    favorited_at_ms: 1_700_000_000_000,
+                    tags: vec!["gato".into()],
+                    hints: vec![],
+                }],
+            })),
+            Ok(Box::new(StickerReply::Done)),
+            Err("no session yet".to_string()),
+        ] {
+            let response = DaemonMessage::Stickers { id: 9, result };
+            let encoded = serde_json::to_string(&response).unwrap();
+            assert_eq!(
+                serde_json::from_str::<DaemonMessage>(&encoded).unwrap(),
+                response
+            );
+        }
+    }
+
     #[test]
     fn device_and_preview_wire_frames_have_independent_identity() {
         let preview_id = oxidezap_core::CameraPreviewId(42);

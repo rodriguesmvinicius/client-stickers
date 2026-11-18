@@ -189,3 +189,36 @@ diesel::table! {
         received_at_ms -> BigInt,
     }
 }
+
+diesel::table! {
+    favorite_stickers (device_id, filehash) {
+        device_id -> Integer,
+        filehash -> Text,
+        direct_path -> Text,
+        media_key -> Binary,
+        file_enc_sha256 -> Binary,
+        mimetype -> Text,
+        file_length -> BigInt,
+        width -> Nullable<Integer>,
+        height -> Nullable<Integer>,
+        is_animated -> Bool,
+        favorited_at_ms -> BigInt,
+        seen_at_ms -> BigInt,
+    }
+}
+
+diesel::table! {
+    sticker_tags (device_id, filehash, tag) {
+        device_id -> Integer,
+        filehash -> Text,
+        tag -> Text,
+    }
+}
+
+diesel::table! {
+    sticker_hints (device_id, filehash) {
+        device_id -> Integer,
+        filehash -> Text,
+        words -> Text,
+    }
+}

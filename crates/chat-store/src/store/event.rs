@@ -477,6 +477,12 @@ pub(super) fn apply_event(
             cs.message_chats.insert(chat);
             Ok(())
         }
+        // Not a chat change: nothing on the list or in a timeline moves, so
+        // the change set stays as it was. The picker reads favorites when it
+        // opens rather than being pushed them.
+        Event::FavoriteStickerUpdate(update) => {
+            crate::store::stickers::apply_favorite(conn, device_id, update)
+        }
         _ => Ok(()),
     }
 }

@@ -97,6 +97,13 @@ pub enum Action {
         request: oxidezap_ipc::GroupMembers,
         answer_to: Outbox,
     },
+    /// Favorite stickers and their tags, answered on `answer_to` like a page:
+    /// the picker is one window's popover.
+    Stickers {
+        id: RequestId,
+        request: oxidezap_ipc::StickerRequest,
+        answer_to: Outbox,
+    },
     /// Wipe local state so the user can pair again, or retire the account for
     /// good. The daemon owns the store, so it is the only process that may
     /// purge it. See [`AccountDisposition`] for what each choice leaves
@@ -231,6 +238,11 @@ impl Action {
         // because the network is down.
         match self {
             Self::Wire { request, .. } => wire_needs_network(request),
+            // Listing and tagging are local; everything else asks WhatsApp.
+            Self::Stickers { request, .. } => !matches!(
+                request,
+                oxidezap_ipc::StickerRequest::List | oxidezap_ipc::StickerRequest::SetTags { .. }
+            ),
             _ => !matches!(
                 self,
                 Self::CallDevices { .. }

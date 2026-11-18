@@ -60,7 +60,7 @@ pub use protocol::{
     GroupMembers, InstallPlugin, LoadChats, LoadMessages, MarkAudioPlayed, MarkRead,
     MarkStatusWatched, MessagePreview, PageCursor, PairingCode, ProtocolError, Request, RequestId,
     RevokeMessage, SendAudio, SendMedia, SendReaction, SendText, StateSnapshot, StateVersion,
-    Typing, VotePoll,
+    StickerReply, StickerRequest, Typing, VotePoll,
 };
 pub use transport::{
     ACCOUNT_STAGED_INFIX, DEFAULT_WEB_PORT, MAX_STAGED_BYTES, PROTOCOL_VERSION, STAGED_PREFIX,

@@ -309,6 +309,8 @@ enum Awaiting {
     /// What this account occupies on disk, for the Storage pane.
     Storage(oneshot::Sender<StorageUsage>),
     CallDevices(oneshot::Sender<Result<oxidezap_ipc::CallDeviceReply, String>>),
+    /// Favorite stickers for the picker, or the result of changing one.
+    Stickers(oneshot::Sender<Result<oxidezap_ipc::StickerReply, String>>),
     /// A message drawn before it was sent. On refusal it has to stop being
     /// pending, and the front end is the side that knows which bubble it is.
     Send {
@@ -382,6 +384,7 @@ impl Awaiting {
             Self::Download(tx) => tx.is_closed(),
             Self::Storage(tx) => tx.is_closed(),
             Self::CallDevices(tx) => tx.is_closed(),
+            Self::Stickers(tx) => tx.is_closed(),
             Self::Acted(tx) => tx.is_closed(),
             Self::Installed { tell, .. } => tell.is_closed(),
             Self::Removed(tx) => tx.is_closed(),
@@ -416,6 +419,9 @@ impl Awaiting {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::CallDevices(tx) => {
+                let _ = tx.send(Err(detail.to_string()));
+            }
+            Self::Stickers(tx) => {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::Mutation(tx) => {
@@ -1756,6 +1762,20 @@ impl SessionHandle {
         self.ask(
             ClientRequest::CallDevices(Box::new(action)),
             Awaiting::CallDevices(tx),
+        );
+        rx
+    }
+
+    /// Ask about favorite stickers. Answered when the daemon has done it; a
+    /// list comes back for `List` and `Resync`, `Done` for a change.
+    pub fn stickers(
+        &self,
+        request: oxidezap_ipc::StickerRequest,
+    ) -> oneshot::Receiver<Result<oxidezap_ipc::StickerReply, String>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::Stickers(Box::new(request)),
+            Awaiting::Stickers(tx),
         );
         rx
     }

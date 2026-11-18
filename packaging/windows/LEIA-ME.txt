@@ -1,0 +1,39 @@
+oxidezap (versão com figurinhas favoritas) — Windows x86_64
+============================================================
+
+Versão portable: não precisa instalar.
+
+1. Extraia esta pasta inteira para onde quiser (ex.: Documentos\oxidezap).
+   Os três programas precisam ficar juntos na mesma pasta:
+     - oxidezap.exe       a janela
+     - oxidezapd.exe      o serviço que mantém a conexão com o WhatsApp
+                          (fica no ícone da bandeja)
+     - oxidezap-cli.exe   linha de comando, opcional
+2. Abra oxidezap.exe. Na primeira vez, vincule pelo QR code em
+   WhatsApp > Aparelhos conectados.
+
+Os dados da conta (sessão, histórico, mídias) ficam no seu perfil do
+Windows, não nesta pasta. A versão portable e a instalada usam os mesmos
+dados: dá para trocar entre elas sem vincular de novo.
+
+Se outra versão do oxidezap estiver aberta, feche-a antes (inclusive o
+ícone da bandeja: botão direito > Sair). Esta versão usa o protocolo 43
+entre janela e serviço e recusa conectar a um serviço de outra versão.
+
+Figurinhas
+----------
+- Botão de figurinha ao lado do emoji: abre as favoritas.
+  Na primeira abertura ele pede ao celular a lista completa de
+  favoritas ("Sincronizar com o celular" repete isso quando quiser).
+- Clique numa figurinha para enviar.
+- Botão direito numa figurinha: hashtags (#gato #bravo), sugestões a
+  partir dos emojis da figurinha, e "Remover das favoritas".
+- Busque digitando #hashtag (ou só o começo: #ga encontra #gato).
+- Botão direito numa figurinha recebida na conversa >
+  "Adicionar figurinha às favoritas": aparece também no celular.
+
+As hashtags ficam só neste computador (o WhatsApp não tem onde
+guardá-las). As favoritas sincronizam com o celular nos dois sentidos.
+
+O Windows SmartScreen pode avisar na primeira execução, porque o
+binário não é assinado: "Mais informações" > "Executar assim mesmo".

@@ -32,6 +32,7 @@ mod recovery;
 mod search;
 mod settings;
 mod status;
+mod stickers;
 mod timeline_ctl;
 mod viewer;
 
@@ -358,6 +359,14 @@ actions!(
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = message, no_json)]
 pub struct ReplyToMessage {
+    pub id: gpui::SharedString,
+}
+
+/// Add the sticker one message carries to the favorites. Carries its subject
+/// like [`ReplyToMessage`].
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = message, no_json)]
+pub struct FavoriteStickerMessage {
     pub id: gpui::SharedString,
 }
 
@@ -3287,6 +3296,12 @@ impl WhatsAppApp {
             InputAreaEvent::CancelReply => {
                 self.cancel_reply(cx);
             }
+            InputAreaEvent::OpenStickers => {
+                self.open_stickers(_input_area, cx);
+            }
+            InputAreaEvent::SendSticker(filehash) => {
+                self.send_favorite_sticker(filehash.clone(), cx);
+            }
             InputAreaEvent::StartedTyping => {
                 // Send "composing" presence
                 if let Some(jid) = &self.selected_chat {
@@ -4469,6 +4484,11 @@ impl Render for WhatsAppApp {
             .on_action(cx.listener(|app, reply: &ReplyToMessage, window, cx| {
                 app.begin_reply(&reply.id, window, cx);
             }))
+            .on_action(
+                cx.listener(|app, favorite: &FavoriteStickerMessage, window, cx| {
+                    app.favorite_sticker_message(&favorite.id, window, cx);
+                }),
+            )
             .on_action(cx.listener(|app, retry: &RetryMessage, window, cx| {
                 app.retry_send(&retry.id, window, cx);
             }))

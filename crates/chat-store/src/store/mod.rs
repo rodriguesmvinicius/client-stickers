@@ -29,6 +29,7 @@ mod recovery;
 pub(crate) mod retirement;
 mod revoke;
 pub(crate) mod shared_history;
+pub(crate) mod stickers;
 mod writer;
 
 use std::sync::{Arc, Mutex};
@@ -364,6 +365,7 @@ impl EventHandler for ChatStoreHandler {
             EventKind::ClearChatUpdate,
             EventKind::DeleteMessageForMeUpdate,
             EventKind::GroupUpdate,
+            EventKind::FavoriteStickerUpdate,
         ])
     }
 }

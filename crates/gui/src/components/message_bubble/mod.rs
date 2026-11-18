@@ -36,8 +36,8 @@ use quote::render_quote;
 use reactions::{render_hover_actions, render_reaction_picker, render_reactions};
 
 use crate::app::{
-    BubbleIds, CopyMessage, DeleteSentMessage, EditMessage, OpenMessageLink, ReactToMessage,
-    ReplyToMessage, RetryMessage, WhatsAppApp, can_delete_sent,
+    BubbleIds, CopyMessage, DeleteSentMessage, EditMessage, FavoriteStickerMessage,
+    OpenMessageLink, ReactToMessage, ReplyToMessage, RetryMessage, WhatsAppApp, can_delete_sent,
 };
 use crate::components::parts;
 use crate::components::{BubbleText, bubble_status_ticks, render_rich_text};
@@ -178,6 +178,11 @@ pub fn render_message_bubble(
         .as_ref()
         .map_or_else(|| message.content.clone(), |business| business.summary());
     let menu_failed = can_retry;
+    // A sticker that can be fetched again can be a favorite: the phone keeps
+    // only where it lives, and this is what it would need.
+    let menu_sticker = message.media.as_ref().is_some_and(|media| {
+        media.media_type == oxidezap_core::MediaType::Sticker && media.downloadable.is_some()
+    });
     let menu_jid = props.chat_jid.clone();
     let now_ms = wacore::time::now_millis();
     let menu_delete_for_me = can_delete_sent(&message, false, now_ms);
@@ -501,6 +506,16 @@ pub fn render_message_bubble(
                     id: menu_id.clone().into(),
                 }),
             );
+            let menu = if menu_sticker {
+                menu.menu(
+                    crate::tr!(FavoriteThisSticker),
+                    Box::new(FavoriteStickerMessage {
+                        id: menu_id.clone().into(),
+                    }),
+                )
+            } else {
+                menu
+            };
             let menu = if menu_text.is_empty() {
                 menu
             } else {

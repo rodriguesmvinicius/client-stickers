@@ -390,4 +390,21 @@ catalog! {
     OutgoingCalling => ("calling", "chamando");
     OutgoingRinging => ("ringing", "tocando");
     OutgoingConnected => ("connected", "conectada");
+    FavoriteStickers => ("Favorite stickers", "Figurinhas favoritas");
+    SearchStickersByTag => ("Search by #tag", "Buscar por #hashtag");
+    NoFavoriteStickers => ("No favorite stickers yet. Right-click a sticker in a chat to favorite it, or sync with your phone.", "Nenhuma figurinha favorita ainda. Clique com o botão direito numa figurinha da conversa para favoritá-la, ou sincronize com o celular.");
+    NoStickerMatchesTag => ("No favorite has these tags", "Nenhuma favorita com essas hashtags");
+    SyncWithPhone => ("Sync with phone", "Sincronizar com o celular");
+    SyncingStickers => ("Syncing with phone...", "Sincronizando com o celular...");
+    StickerSyncFailed => ("Could not sync with the phone", "Não foi possível sincronizar com o celular");
+    StickerTagsPlaceholder => ("#tag #another", "#hashtag #outra");
+    SaveTags => ("Save tags", "Salvar hashtags");
+    RemoveFromFavorites => ("Remove from favorites", "Remover das favoritas");
+    EditStickerTags => ("Right-click: tags and options", "Botão direito: hashtags e opções");
+    SuggestedTags => ("Suggested:", "Sugestões:");
+    FavoriteThisSticker => ("Add sticker to favorites", "Adicionar figurinha às favoritas");
+    StickerFavorited => ("Sticker added to favorites", "Figurinha adicionada às favoritas");
+    StickerFavoriteFailed => ("Could not favorite the sticker", "Não foi possível favoritar a figurinha");
+    StickerSendFailed => ("Could not send the sticker", "Não foi possível enviar a figurinha");
+    StickerCountLabel => ("favorites", "favoritas");
 }

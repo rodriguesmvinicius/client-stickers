@@ -57,6 +57,11 @@ pub use chat::{
     Chat, ChatMessage, DownloadableMedia, GroupHierarchy, MediaContent, MediaType, OutgoingMedia,
     PollContent, ReleasedMedia, Resend, SubgroupKind,
 };
+pub use chat::{
+    FavoriteSticker, format_tags as format_sticker_tags, hints_from as sticker_hints_from,
+    normalize_tag as normalize_sticker_tag, parse_tags as parse_sticker_tags,
+    sort_favorites as sort_favorite_stickers,
+};
 pub use chat::{fallback_chat_name, fallback_sender_name};
 pub use events::{AvatarOutcome, AvatarResolution, ReceiptType, UiEvent};
 pub use group::{GroupMember, GroupRoster};

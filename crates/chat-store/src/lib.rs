@@ -42,6 +42,7 @@ mod point_lookup;
 mod queries;
 mod schema;
 mod spawn;
+mod sticker_queries;
 mod storage_proto;
 mod store;
 pub mod types;
@@ -53,6 +54,7 @@ pub use materialize::{
     supported_poll_creation_message,
 };
 pub use queries::MessageReadState;
+pub use sticker_queries::FavoriteWrite;
 pub use store::ChatStore;
 pub use store::retirement::AccountRetirement;
 pub use store::shared_history::PendingHistoryBundle;

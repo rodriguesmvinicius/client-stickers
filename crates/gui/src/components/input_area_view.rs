@@ -17,6 +17,7 @@ use gpui_component::{
 };
 
 use super::emoji_picker::{EmojiPicked, EmojiPicker};
+use super::sticker_picker::{StickerPicked, StickerPicker};
 use crate::components::{ProductIcon, parts};
 use crate::platform::picker::AttachmentCategory;
 use crate::theme::{ActiveProductTheme as _, Metrics};
@@ -47,6 +48,10 @@ pub enum InputAreaEvent {
     /// User dropped the reply they were composing.
     CancelReply,
     CancelEdit,
+    /// The sticker popover opened; the app hands it a session to list with.
+    OpenStickers,
+    /// A favorite sticker was picked, by its hash.
+    SendSticker(String),
 }
 
 /// Typing indicator state with debouncing.
@@ -123,6 +128,8 @@ pub struct InputAreaView {
     input: Entity<TextareaState>,
     emoji_picker: Entity<EmojiPicker>,
     emoji_open: bool,
+    sticker_picker: Entity<StickerPicker>,
+    sticker_open: bool,
     language: crate::i18n::Language,
     /// Whether PTT recording is active
     is_recording: bool,
@@ -194,10 +201,24 @@ impl InputAreaView {
         )
         .detach();
 
+        let sticker_picker = cx.new(|cx| StickerPicker::new(window, cx));
+        cx.subscribe_in(
+            &sticker_picker,
+            window,
+            |this, _, event: &StickerPicked, _window, cx| {
+                this.sticker_open = false;
+                cx.emit(InputAreaEvent::SendSticker(event.0.clone()));
+                cx.notify();
+            },
+        )
+        .detach();
+
         Self {
             input,
             emoji_picker,
             emoji_open: false,
+            sticker_picker,
+            sticker_open: false,
             language: crate::i18n::Language::current(),
             is_recording: false,
             editing: false,
@@ -351,6 +372,16 @@ impl InputAreaView {
         self.stop_typing_internal(cx);
         self.emoji_open = false;
         cx.emit(InputAreaEvent::SendMessage(text));
+    }
+
+    /// The favorites popover opened: list them through this connection.
+    pub fn open_stickers(
+        &mut self,
+        session: crate::session::SessionHandle,
+        cx: &mut Context<Self>,
+    ) {
+        self.sticker_picker
+            .update(cx, |picker, cx| picker.opened(session, cx));
     }
 
     fn insert_emoji(&mut self, emoji: &'static str, window: &mut Window, cx: &mut Context<Self>) {
@@ -534,6 +565,8 @@ impl InputAreaView {
         let attach_entity = entity.clone();
         let emoji_entity = entity.clone();
         let picker = self.emoji_picker.clone();
+        let sticker_entity = entity.clone();
+        let stickers = self.sticker_picker.clone();
         // Asked of the rope rather than of a copy of it. `text()` hands back
         // the document itself; `to_string` copied all of it, on every
         // keystroke, to answer whether the send button or the microphone
@@ -617,6 +650,34 @@ impl InputAreaView {
                             .readonly(self.edit_pending)
                             .w_full(),
                     ),
+            )
+            .child(
+                Popover::new("sticker-popover")
+                    .anchor(gpui::Anchor::BottomRight)
+                    .open(self.sticker_open)
+                    .on_open_change(move |open, _, cx| {
+                        sticker_entity.update(cx, |view, cx| {
+                            let open = *open && !view.editing && !view.is_recording;
+                            let opening = open && !view.sticker_open;
+                            view.sticker_open = open;
+                            if opening {
+                                cx.emit(InputAreaEvent::OpenStickers);
+                            }
+                            cx.notify();
+                        });
+                    })
+                    .track_focus(&self.sticker_picker.read(cx).focus_handle(cx))
+                    .trigger(
+                        parts::icon_button(
+                            "stickers",
+                            Icon::new(ProductIcon::Sticker),
+                            crate::tr!(FavoriteStickers),
+                            control,
+                        )
+                        .disabled(self.editing || self.edit_pending)
+                        .debug_selector(|| "sticker-trigger".into()),
+                    )
+                    .content(move |_, _, _| stickers.clone()),
             )
             .child(
                 Popover::new("emoji-popover")

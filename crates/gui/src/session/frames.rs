@@ -165,6 +165,11 @@ impl<'a> Frames<'a> {
                     let _ = tx.send(result.map(|reply| *reply));
                 }
             }
+            DaemonMessage::Stickers { id, result } => {
+                if let Some(Awaiting::Stickers(tx)) = take_pending(self.pending, id) {
+                    let _ = tx.send(result.map(|reply| *reply));
+                }
+            }
 
             // The first frame, and the only one that describes where things
             // already stand. A window opened while the daemon was already

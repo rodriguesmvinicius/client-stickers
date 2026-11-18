@@ -12,11 +12,15 @@ mod merge;
 mod message;
 mod reactions;
 mod retain;
+mod stickers;
 
 pub use group_hierarchy::{GroupHierarchy, SubgroupKind};
 pub use media::{DownloadableMedia, MediaContent, MediaType, OutgoingMedia};
 pub use message::{ChatMessage, PollContent, Resend};
 pub use retain::ReleasedMedia;
+pub use stickers::{
+    FavoriteSticker, format_tags, hints_from, normalize_tag, parse_tags, sort_favorites,
+};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

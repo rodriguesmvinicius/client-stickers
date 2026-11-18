@@ -439,6 +439,34 @@ impl Bridge {
                 });
                 None
             }
+            Action::Stickers {
+                id,
+                request,
+                answer_to,
+            } => {
+                // A permit before the call, as for a roster: each of these
+                // spawns its work as it returns.
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = sticker_task(client, request);
+                oxidezap_session::spawn(async move {
+                    let result = match task.await {
+                        Ok(result) => result.map(Box::new),
+                        Err(_) => {
+                            Err("the session stopped before the stickers arrived".to_string())
+                        }
+                    };
+                    answer_now(
+                        &answer_to,
+                        answered(id, Ok(DaemonMessage::Stickers { id, result })),
+                    );
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::Wire {
                 id,
                 request,
@@ -1638,7 +1666,8 @@ impl Bridge {
             | Action::MarkStatusWatched(_)
             | Action::LoadMessages { .. }
             | Action::LoadChats { .. }
-            | Action::GroupMembers { .. } => {
+            | Action::GroupMembers { .. }
+            | Action::Stickers { .. } => {
                 CommandOutcome::Refused("a store read reached the wrong path".to_string())
             }
             Action::Typing(oxidezap_ipc::Typing { jid, composing }) => {
@@ -2139,6 +2168,60 @@ fn too_busy() -> CommandOutcome {
 /// `RequestId` and a front end matches on it, so nothing is lost. Serializing
 /// would mean a spill queue per connection, which buys an ordering nothing
 /// reads at the cost of a second buffer per client.
+/// One sticker request, carried out by the session, as the reply the picker
+/// reads. A change answers `Done`; the picker lists again when it wants the
+/// result.
+fn sticker_task(
+    client: &WhatsAppClient,
+    request: oxidezap_ipc::StickerRequest,
+) -> oxidezap_session::Task<Result<oxidezap_ipc::StickerReply, String>> {
+    use oxidezap_ipc::{StickerReply, StickerRequest};
+    let listed =
+        |task: oxidezap_session::Task<Result<Vec<oxidezap_core::FavoriteSticker>, String>>| {
+            oxidezap_session::spawn(async move {
+                task.await
+                    .map_err(|_| "the session stopped".to_string())?
+                    .map(|stickers| StickerReply::Favorites { stickers })
+            })
+        };
+    let done = |task: oxidezap_session::Task<Result<(), String>>| {
+        oxidezap_session::spawn(async move {
+            task.await
+                .map_err(|_| "the session stopped".to_string())?
+                .map(|()| StickerReply::Done)
+        })
+    };
+    match request {
+        StickerRequest::List => listed(client.favorite_stickers()),
+        StickerRequest::Resync => listed(client.resync_favorite_stickers()),
+        StickerRequest::SetFavorite {
+            media,
+            width,
+            height,
+            is_animated,
+            favorite,
+        } => done(
+            client.set_sticker_favorite(oxidezap_session::StickerFavorite {
+                media: *media,
+                width,
+                height,
+                is_animated,
+                favorite,
+            }),
+        ),
+        StickerRequest::Unfavorite { filehash } => done(client.unfavorite_sticker(filehash)),
+        StickerRequest::SetTags { filehash, tags } => done(client.set_sticker_tags(filehash, tags)),
+        StickerRequest::Send { to, filehash } => {
+            let task = client.send_favorite_sticker(to, filehash);
+            oxidezap_session::spawn(async move {
+                task.await
+                    .map_err(|_| "the session stopped".to_string())?
+                    .map(|_| StickerReply::Done)
+            })
+        }
+    }
+}
+
 fn answer_now(answer_to: &Outbox, frame: String) {
     use tokio::sync::mpsc::error::TrySendError;
     if let Err(TrySendError::Full(frame)) = answer_to.try_send(frame) {

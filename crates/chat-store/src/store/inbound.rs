@@ -43,6 +43,10 @@ pub(super) fn apply_inbound(
         cs.contacts |= upsert_contact_business_name(conn, device_id, &sender, name)?;
     }
 
+    // What a sticker came with — its emojis and label — so a favorite of the
+    // same sticker can be found by them later. Never fails the message.
+    super::stickers::note_hints(conn, device_id, &inbound.message);
+
     match classify(&inbound.message) {
         MessageOp::Store { kind, text } => {
             if kind == "history_notice"
