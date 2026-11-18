@@ -28,7 +28,10 @@ SetCompressor /SOLID lzma
 
 ; makensis runs from this script's folder (unless given /NOCD), so paths
 ; into the repository are relative to it, whatever folder it was called from.
-!define ICON "../../web/icons/favicon.ico"
+; Backslashes throughout: on Windows `File` splits a path at the last
+; backslash only, so "dir/name.exe" is taken as a file named "dir/name.exe"
+; and found nowhere. makensis on Linux turns them into slashes itself.
+!define ICON "..\..\web\icons\favicon.ico"
 
 !define APPNAME "oxidezap"
 !define PUBLISHER "oxidezap (unofficial WhatsApp client)"
@@ -90,10 +93,10 @@ Section "$(SecApp)" SecMain
   SectionIn RO
   !insertmacro StopRunning
   SetOutPath "$INSTDIR"
-  File "${STAGE}/oxidezap.exe"
-  File "${STAGE}/oxidezapd.exe"
-  File "${STAGE}/oxidezap-cli.exe"
-  File "${STAGE}/NotoColorEmoji-OFL.txt"
+  File "${STAGE}\oxidezap.exe"
+  File "${STAGE}\oxidezapd.exe"
+  File "${STAGE}\oxidezap-cli.exe"
+  File "${STAGE}\NotoColorEmoji-OFL.txt"
   File "/oname=oxidezap.ico" "${ICON}"
 
   CreateDirectory "$SMPROGRAMS\oxidezap"
