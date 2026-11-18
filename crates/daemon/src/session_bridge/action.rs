@@ -34,6 +34,11 @@ pub enum Action {
         request: oxidezap_ipc::RevokeMessage,
         answer_to: Outbox,
     },
+    ForwardMessage {
+        id: RequestId,
+        request: oxidezap_ipc::ForwardMessage,
+        answer_to: Outbox,
+    },
     SendAudio(oxidezap_ipc::SendAudio),
     SendMedia(oxidezap_ipc::SendMedia),
     SendReaction(oxidezap_ipc::SendReaction),

@@ -16,6 +16,7 @@ mod chats;
 mod commands;
 pub(crate) mod editing;
 mod events;
+mod forward;
 pub use editing::EditMessage;
 #[cfg(test)]
 mod frame_cost;
@@ -136,6 +137,8 @@ enum KeyboardOwner {
     MessageEdit,
     /// An addressed sent-message deletion awaiting final confirmation.
     MessageDelete,
+    /// Choosing the chats a message is forwarded to.
+    Forward,
     /// Files pasted or dropped into the composer, waiting for explicit
     /// confirmation before anything is uploaded.
     PastePreview,
@@ -172,6 +175,8 @@ pub struct KeyboardSurfaces {
     pub paste_preview: bool,
     pub message_edit: bool,
     pub message_delete: bool,
+    /// The forward dialog, which the root draws over everything else.
+    pub forward: bool,
     /// The call card, which only the connected screens float.
     pub call_card: bool,
 }
@@ -367,6 +372,14 @@ pub struct ReplyToMessage {
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = message, no_json)]
 pub struct FavoriteStickerMessage {
+    pub id: gpui::SharedString,
+}
+
+/// Forward one message to other chats. Carries its subject like
+/// [`ReplyToMessage`].
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = message, no_json)]
+pub struct ForwardChatMessage {
     pub id: gpui::SharedString,
 }
 
@@ -1046,6 +1059,10 @@ pub struct WhatsAppApp {
     /// the strip is drawn inline under its bubble, and two open strips would
     /// each move the timeline the other measured against.
     reaction_picker_for: Option<String>,
+    /// The full emoji picker behind the quick-react strip's "+", one for the
+    /// window: the strip is drawn under one message at a time.
+    reaction_emoji: Option<Entity<crate::components::EmojiPicker>>,
+    reaction_emoji_open: bool,
     delete_confirmation: Option<message_actions::DeleteConfirmation>,
     pending_message_actions: HashSet<(String, String)>,
     #[cfg(test)]
@@ -1086,6 +1103,14 @@ pub struct WhatsAppApp {
     pub(crate) avatar_manager: crate::session::avatar::AvatarManager,
     /// Cached fingerprint of the visible row range and avatar state to avoid redundant work.
     last_avatar_window_fingerprint: Option<u64>,
+    /// Pictures of status authors who have no chat in the list to carry one,
+    /// by JID. See [`WhatsAppApp::status_avatar_keys`].
+    status_avatars: HashMap<String, String>,
+    /// What the status list last asked pictures for, so a repaint that
+    /// changes nothing does not ask again.
+    last_status_avatar_fingerprint: Option<u64>,
+    /// The forward dialog, while it is up. See `app/forward.rs`.
+    forward: Option<forward::Forwarding>,
 }
 
 /// Store-backed conversation and attention facts delivered with a message.
@@ -1561,6 +1586,8 @@ impl WhatsAppApp {
             edit_generation: 0,
             pending_edits: std::collections::HashSet::new(),
             reaction_picker_for: None,
+            reaction_emoji: None,
+            reaction_emoji_open: false,
             delete_confirmation: None,
             pending_message_actions: HashSet::new(),
             #[cfg(test)]
@@ -1574,6 +1601,9 @@ impl WhatsAppApp {
             heartbeat: None,
             avatar_manager: crate::session::avatar::AvatarManager::new(),
             last_avatar_window_fingerprint: None,
+            status_avatars: HashMap::new(),
+            last_status_avatar_fingerprint: None,
+            forward: None,
         }
     }
 
@@ -2563,6 +2593,19 @@ impl WhatsAppApp {
     }
 
     /// The message whose quick-react strip is open, if any.
+    /// The full emoji picker the quick-react strip's "+" opens, and whether
+    /// it is open.
+    pub fn reaction_emoji(&self) -> Option<(Entity<crate::components::EmojiPicker>, bool)> {
+        self.reaction_emoji
+            .clone()
+            .map(|picker| (picker, self.reaction_emoji_open))
+    }
+
+    pub fn set_reaction_emoji_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.reaction_emoji_open = open;
+        cx.notify();
+    }
+
     pub fn reaction_picker_for(&self) -> Option<&str> {
         self.reaction_picker_for.as_deref()
     }
@@ -4426,6 +4469,22 @@ impl Render for WhatsAppApp {
             window.refresh();
         }
         let entity = cx.entity();
+        if self.reaction_emoji.is_none() {
+            let picker = cx.new(|cx| crate::components::EmojiPicker::new(window, cx));
+            cx.subscribe_in(
+                &picker,
+                window,
+                |app, _, picked: &crate::components::EmojiPicked, window, cx| {
+                    app.reaction_emoji_open = false;
+                    if let Some(message_id) = app.reaction_picker_for.clone() {
+                        app.toggle_reaction(&message_id, picked.0, window, cx);
+                    }
+                    cx.notify();
+                },
+            )
+            .detach();
+            self.reaction_emoji = Some(picker);
+        }
         if self.body.is_none() {
             self.body = Some(cx.new(|cx| body::Body::new(self, entity.clone(), cx)));
         }
@@ -4484,6 +4543,11 @@ impl Render for WhatsAppApp {
             .on_action(cx.listener(|app, reply: &ReplyToMessage, window, cx| {
                 app.begin_reply(&reply.id, window, cx);
             }))
+            .on_action(
+                cx.listener(|app, forward: &ForwardChatMessage, window, cx| {
+                    app.begin_forward(&forward.id, window, cx);
+                }),
+            )
             .on_action(
                 cx.listener(|app, favorite: &FavoriteStickerMessage, window, cx| {
                     app.favorite_sticker_message(&favorite.id, window, cx);
@@ -4547,8 +4611,11 @@ impl Render for WhatsAppApp {
         // call card above a fullscreen viewer or confirmation surface.
         let paste_preview_open = paste_preview.is_some();
         let message_delete_open = message_delete.is_some();
+        let forward_overlay = self.forward.as_ref().map(|forward| forward.picker.clone());
+        let forward_open = forward_overlay.is_some();
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
-        let modal_open = paste_preview_open || message_delete_open || media_viewer_open;
+        let modal_open =
+            paste_preview_open || message_delete_open || media_viewer_open || forward_open;
         let call_overlay = (connected && !modal_open)
             .then(|| render_call_overlay(self, window, cx))
             .flatten();
@@ -4593,6 +4660,7 @@ impl Render for WhatsAppApp {
         )
         .children(paste_preview)
         .children(message_delete)
+        .children(forward_overlay)
         .children(call_overlay)
         .child(self.notices().clone())
         // Cached views report their surfaces in prepaint. Move focus after
@@ -4604,6 +4672,7 @@ impl Render for WhatsAppApp {
                         app.keyboard_surfaces.call_card = call_card;
                         app.keyboard_surfaces.paste_preview = paste_preview_open;
                         app.keyboard_surfaces.message_delete = message_delete_open;
+                        app.keyboard_surfaces.forward = forward_open;
                     });
                     let entity = entity.downgrade();
                     window.defer(cx, move |window, cx| {

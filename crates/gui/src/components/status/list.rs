@@ -32,6 +32,8 @@ pub struct StatusListProps {
     pub can_load_more: bool,
     /// Whose updates are open, so the row reads as selected.
     pub selected: StatusSelection,
+    /// Each author's picture, by the JID the feed names them with.
+    pub avatars: std::collections::HashMap<String, String>,
     /// Where this list is scrolled to, which is also what its scrollbar
     /// paints itself over.
     pub scroll: gpui::ScrollHandle,
@@ -217,6 +219,7 @@ fn render_rows(
                             author,
                             props.selected.is(&author.jid),
                             None,
+                            props.avatars.get(&author.jid).cloned(),
                             rows_entity.clone(),
                             layout,
                             cx,
@@ -317,6 +320,7 @@ fn render_mine(
                 author,
                 props.selected == StatusSelection::Mine,
                 Some(subtitle.clone()),
+                props.avatars.get(&author.jid).cloned(),
                 entity,
                 layout,
                 cx,
@@ -360,7 +364,16 @@ fn render_recent(
     rows.push(section_label(crate::tr!(Recent), metrics, cx).into_any_element());
     rows.extend(authors.iter().map(|author| {
         let is_selected = props.selected.is(&author.jid);
-        render_author_row(author, is_selected, None, entity.clone(), layout, cx).into_any_element()
+        render_author_row(
+            author,
+            is_selected,
+            None,
+            props.avatars.get(&author.jid).cloned(),
+            entity.clone(),
+            layout,
+            cx,
+        )
+        .into_any_element()
     }));
     rows
 }
@@ -382,6 +395,7 @@ fn render_author_row(
     author: &StatusAuthor,
     is_selected: bool,
     subtitle: Option<SharedString>,
+    picture: Option<String>,
     entity: Entity<WhatsAppApp>,
     layout: ResponsiveLayout,
     cx: &App,
@@ -438,6 +452,7 @@ fn render_author_row(
         .child(status_ring(
             &author.jid,
             &author.name,
+            picture,
             avatar,
             author.count(),
             author.unseen,
@@ -604,6 +619,7 @@ mod visible_cost {
                     feed: self.feed.clone(),
                     can_load_more: false,
                     selected: self.selected.clone(),
+                    avatars: std::collections::HashMap::new(),
                     scroll: self.scroll.clone(),
                 },
                 self.app.clone(),

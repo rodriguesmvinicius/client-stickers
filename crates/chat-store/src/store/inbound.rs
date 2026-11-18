@@ -45,7 +45,18 @@ pub(super) fn apply_inbound(
 
     // What a sticker came with — its emojis and label — so a favorite of the
     // same sticker can be found by them later. Never fails the message.
-    super::stickers::note_hints(conn, device_id, &inbound.message);
+    super::stickers::note_sticker(
+        conn,
+        device_id,
+        &inbound.message,
+        Some(super::stickers::StickerOrigin {
+            chat: &chat,
+            message_id: &info.id,
+            sender: &sender,
+            from_me: info.source.is_from_me,
+            at_ms: ts_ms,
+        }),
+    );
 
     match classify(&inbound.message) {
         MessageOp::Store { kind, text } => {

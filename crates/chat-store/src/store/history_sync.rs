@@ -358,6 +358,20 @@ pub(super) fn apply_history_message(
     }
 
     if let Some(message) = wmi.message.as_option() {
+        // History carries most of the stickers a person has; a favorite whose
+        // own CDN path has gone is usually rescued by one of these.
+        super::stickers::note_sticker(
+            conn,
+            device_id,
+            message,
+            Some(super::stickers::StickerOrigin {
+                chat,
+                message_id: msg_id,
+                sender,
+                from_me,
+                at_ms: ts_ms,
+            }),
+        );
         match classify(message) {
             MessageOp::Store { kind, text } => {
                 if kind == "history_notice"

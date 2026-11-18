@@ -195,6 +195,10 @@ pub fn render_connected_view(
         app.reconcile_status_pane(cx);
     }
     let status_feed = (destination == Destination::Status).then(|| app.status_feed());
+    let status_avatars = status_feed
+        .as_ref()
+        .map(|feed| app.status_avatar_keys(feed))
+        .unwrap_or_default();
     let status_view = status_feed.as_ref().and_then(|feed| {
         let selected = app.status_pane().author()?;
         let author = feed.author(selected)?;
@@ -222,6 +226,7 @@ pub fn render_connected_view(
         Some(StatusViewProps {
             author_jid: author.jid.clone(),
             author_name: author.name.clone().into(),
+            author_avatar: status_avatars.get(&author.jid).cloned(),
             message,
             image,
             frame,
@@ -235,6 +240,7 @@ pub fn render_connected_view(
         feed,
         can_load_more: app.status_can_load_more(cx),
         selected: StatusSelection::of(app.status_pane().author()),
+        avatars: status_avatars,
         scroll: app.status_list_scroll().clone(),
     });
     let unseen_status = app.status_unseen();
@@ -264,6 +270,7 @@ pub fn render_connected_view(
         paste_preview: false,
         message_edit: false,
         message_delete: false,
+        forward: false,
         // The card floats above this view rather than inside it, so the root
         // is what knows whether one was drawn. See `WhatsAppApp::render`.
         call_card: false,

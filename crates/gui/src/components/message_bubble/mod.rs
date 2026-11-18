@@ -37,7 +37,8 @@ use reactions::{render_hover_actions, render_reaction_picker, render_reactions};
 
 use crate::app::{
     BubbleIds, CopyMessage, DeleteSentMessage, EditMessage, FavoriteStickerMessage,
-    OpenMessageLink, ReactToMessage, ReplyToMessage, RetryMessage, WhatsAppApp, can_delete_sent,
+    ForwardChatMessage, OpenMessageLink, ReactToMessage, ReplyToMessage, RetryMessage, WhatsAppApp,
+    can_delete_sent,
 };
 use crate::components::parts;
 use crate::components::{BubbleText, bubble_status_ticks, render_rich_text};
@@ -183,6 +184,9 @@ pub fn render_message_bubble(
     let menu_sticker = message.media.as_ref().is_some_and(|media| {
         media.media_type == oxidezap_core::MediaType::Sticker && media.downloadable.is_some()
     });
+    // What the store holds can be relayed; a deleted message, a line the
+    // client wrote itself and a send that never left have nothing to relay.
+    let menu_forward = !message.revoked && message.system.is_none() && !can_retry;
     let menu_jid = props.chat_jid.clone();
     let now_ms = wacore::time::now_millis();
     let menu_delete_for_me = can_delete_sent(&message, false, now_ms);
@@ -506,6 +510,16 @@ pub fn render_message_bubble(
                     id: menu_id.clone().into(),
                 }),
             );
+            let menu = if menu_forward {
+                menu.menu(
+                    crate::tr!(Forward),
+                    Box::new(ForwardChatMessage {
+                        id: menu_id.clone().into(),
+                    }),
+                )
+            } else {
+                menu
+            };
             let menu = if menu_sticker {
                 menu.menu(
                     crate::tr!(FavoriteThisSticker),

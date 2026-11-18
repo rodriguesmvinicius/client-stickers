@@ -31,7 +31,7 @@ SetCompressor /SOLID lzma
 ; Backslashes throughout: on Windows `File` splits a path at the last
 ; backslash only, so "dir/name.exe" is taken as a file named "dir/name.exe"
 ; and found nowhere. makensis on Linux turns them into slashes itself.
-!define ICON "..\..\web\icons\favicon.ico"
+!define ICON "oxidezap.ico"
 
 !define APPNAME "oxidezap"
 !define PUBLISHER "oxidezap (unofficial WhatsApp client)"

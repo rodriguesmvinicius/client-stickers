@@ -729,6 +729,20 @@ pub struct RevokeMessage {
     pub for_everyone: bool,
 }
 
+/// Forward one stored message to other chats.
+///
+/// The stored message is relayed, not rebuilt: its media is already on the
+/// CDN, so nothing is downloaded or uploaded again. Each copy is written to
+/// its chat as an ordinary send before it goes, so it appears at once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ForwardMessage {
+    /// The chat the message is in.
+    pub jid: String,
+    pub message_id: String,
+    /// Where the copies go, in the order they are sent.
+    pub to: Vec<String>,
+}
+
 /// Send a recorded voice note. See [`ClientRequest::SendAudio`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendAudio {
@@ -1017,6 +1031,9 @@ pub enum ClientRequest {
     /// `Box` is transparent to serde, and the round-trip test pins the bytes.
     SendText(Box<SendText>),
     RevokeMessage(RevokeMessage),
+    /// Forward a message to other chats; answered under its id once every
+    /// copy has been sent, or with what went wrong.
+    ForwardMessage(ForwardMessage),
     /// Send a recorded voice note.
     ///
     /// The audio arrives through the media cache rather than the socket: it
@@ -1370,6 +1387,10 @@ pub enum StickerRequest {
     SetTags { filehash: String, tags: Vec<String> },
     /// Send a favorite into a chat.
     Send { to: String, filehash: String },
+    /// A favorite's file did not load: find one that does (a newer upload a
+    /// message carried, or the phone uploading that message's file again),
+    /// and answer with the favorite pointed at it.
+    Repair { filehash: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1384,6 +1405,10 @@ pub enum StickerReply {
     },
     /// A change went through; nothing else to say.
     Done,
+    /// The favorite, pointed at a file that answers.
+    Repaired {
+        sticker: Box<oxidezap_core::FavoriteSticker>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -2088,6 +2113,14 @@ mod tests {
                 r#"{"request":"revoke_message","jid":"559900000001@s.whatsapp.net","message_id":"MSG-R","for_everyone":false}"#.to_string(),
             ),
             (
+                ClientRequest::ForwardMessage(ForwardMessage {
+                    jid: "559900000001@s.whatsapp.net".into(),
+                    message_id: "MSG-F".into(),
+                    to: vec!["559900000002@s.whatsapp.net".into()],
+                }),
+                r#"{"request":"forward_message","jid":"559900000001@s.whatsapp.net","message_id":"MSG-F","to":["559900000002@s.whatsapp.net"]}"#.to_string(),
+            ),
+            (
                 ClientRequest::SendAudio(Box::new(SendAudio {
                     jid: "559900000001@s.whatsapp.net".into(),
                     upload: "staged-local-1".into(),
@@ -2454,6 +2487,9 @@ mod device_contract_tests {
             },
             StickerRequest::Send {
                 to: "1@s.whatsapp.net".into(),
+                filehash: "AwMD".into(),
+            },
+            StickerRequest::Repair {
                 filehash: "AwMD".into(),
             },
         ] {

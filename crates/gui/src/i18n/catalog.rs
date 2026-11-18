@@ -407,5 +407,13 @@ catalog! {
     StickerFavoriteFailed => ("Could not favorite the sticker", "Não foi possível favoritar a figurinha");
     StickerSendFailed => ("Could not send the sticker", "Não foi possível enviar a figurinha");
     StickerCountLabel => ("favorites", "favoritas");
+    MoreReactions => ("More reactions", "Mais reações");
     StickerPicturesFailed => ("could not be loaded; hover the ⚠ to see why", "não carregaram; passe o mouse no ⚠ para ver o motivo");
+    Forward => ("Forward", "Encaminhar");
+    ForwardMessageTo => ("Forward message to", "Encaminhar mensagem para");
+    SearchChatsToForward => ("Search chats", "Pesquisar conversas");
+    ForwardLimitReached => ("you can forward to up to 5 chats", "é possível encaminhar para até 5 conversas");
+    NoChatsMatch => ("No chats match", "Nenhuma conversa encontrada");
+    MessageForwarded => ("Message forwarded", "Mensagem encaminhada");
+    ForwardFailed => ("Could not forward the message", "Não foi possível encaminhar a mensagem");
 }

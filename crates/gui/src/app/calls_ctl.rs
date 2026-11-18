@@ -1298,6 +1298,11 @@ impl WhatsAppApp {
         match &wanted {
             KeyboardOwner::RingingCall(_) => window.focus(&self.call_focus, cx),
             KeyboardOwner::MessageDelete => window.focus(&self.message_delete_focus, cx),
+            KeyboardOwner::Forward => {
+                if let Some(forward) = self.forward.as_ref() {
+                    window.focus(&forward.picker.read(cx).focus_handle(cx), cx);
+                }
+            }
             KeyboardOwner::MessageEdit => {
                 if let Some(input) = self.input_area.as_ref() {
                     window.focus(&input.read(cx).focus_handle(cx), cx);
@@ -1433,6 +1438,7 @@ fn keyboard_owner_for(
     match ringing_call.filter(|_| surfaces.call_card) {
         Some(call_id) => KeyboardOwner::RingingCall(call_id),
         None if surfaces.message_delete => KeyboardOwner::MessageDelete,
+        None if surfaces.forward => KeyboardOwner::Forward,
         None if surfaces.message_edit => KeyboardOwner::MessageEdit,
         None if surfaces.paste_preview => KeyboardOwner::PastePreview,
         None if surfaces.viewer => KeyboardOwner::Viewer,
@@ -1511,6 +1517,7 @@ mod keyboard_owner_tests {
         paste_preview: false,
         message_edit: false,
         message_delete: false,
+        forward: false,
         call_card: false,
     };
 
@@ -1535,6 +1542,7 @@ mod keyboard_owner_tests {
             paste_preview: true,
             message_edit: false,
             message_delete: false,
+            forward: false,
             call_card: true,
         };
         assert_eq!(

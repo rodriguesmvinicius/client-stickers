@@ -251,6 +251,149 @@ impl ChatStore {
     }
 }
 
+/// The newest message seen carrying a sticker, and where its file was then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeenSticker {
+    pub chat_jid: String,
+    pub message_id: String,
+    pub sender_jid: String,
+    pub from_me: bool,
+    /// Without the plaintext digest, like a listed favorite's (see
+    /// `favorite_of`).
+    pub media: DownloadableMedia,
+}
+
+/// `sticker_seen` as selected: chat, message, sender, from-me, path, key,
+/// encrypted hash, length, MIME type.
+type SeenRow = (
+    String,
+    String,
+    String,
+    bool,
+    String,
+    Vec<u8>,
+    Vec<u8>,
+    i64,
+    String,
+);
+
+impl ChatStore {
+    /// Where a message last carried this sticker, if one has.
+    pub async fn sticker_seen(&self, filehash: &str) -> Result<Option<SeenSticker>> {
+        let device_id = self.device_id();
+        let filehash = filehash.to_string();
+        Ok(self
+            .db()
+            .run(move |conn| {
+                use schema::sticker_seen::dsl as s;
+                let row: Option<SeenRow> = s::sticker_seen
+                    .filter(s::device_id.eq(device_id))
+                    .filter(s::filehash.eq(&filehash))
+                    .select((
+                        s::chat_jid,
+                        s::message_id,
+                        s::sender_jid,
+                        s::from_me,
+                        s::direct_path,
+                        s::media_key,
+                        s::file_enc_sha256,
+                        s::file_length,
+                        s::mimetype,
+                    ))
+                    .first(conn)
+                    .optional()
+                    .map_err(db_err)?;
+                Ok(row.map(
+                    |(
+                        chat_jid,
+                        message_id,
+                        sender_jid,
+                        from_me,
+                        direct_path,
+                        media_key,
+                        file_enc_sha256,
+                        file_length,
+                        mime_type,
+                    )| {
+                        SeenSticker {
+                            chat_jid,
+                            message_id,
+                            sender_jid,
+                            from_me,
+                            media: DownloadableMedia {
+                                direct_path,
+                                media_key,
+                                file_enc_sha256,
+                                file_sha256: Vec::new(),
+                                static_url: None,
+                                is_thumbnail: false,
+                                file_length: u64::try_from(file_length).unwrap_or(0),
+                                mime_type,
+                                duration_secs: None,
+                                download_type: wacore::download::MediaType::Sticker,
+                            },
+                        }
+                    },
+                ))
+            })
+            .await?)
+    }
+
+    /// The phone re-uploaded the message's file: remember the new path.
+    pub async fn set_sticker_seen_path(&self, filehash: &str, direct_path: &str) -> Result<()> {
+        let device_id = self.device_id();
+        let (filehash, direct_path) = (filehash.to_string(), direct_path.to_string());
+        Ok(self
+            .db()
+            .run(move |conn| {
+                use schema::sticker_seen::dsl as s;
+                diesel::update(
+                    s::sticker_seen
+                        .filter(s::device_id.eq(device_id))
+                        .filter(s::filehash.eq(&filehash)),
+                )
+                .set(s::direct_path.eq(&direct_path))
+                .execute(conn)
+                .map(|_| ())
+                .map_err(db_err)
+            })
+            .await?)
+    }
+
+    /// Point a favorite at a file that answers. The CDN fields go together:
+    /// a path from another upload needs that upload's key and digest.
+    pub async fn repoint_favorite_sticker(
+        &self,
+        filehash: &str,
+        media: &DownloadableMedia,
+    ) -> Result<()> {
+        let device_id = self.device_id();
+        let filehash = filehash.to_string();
+        let media = media.clone();
+        Ok(self
+            .db()
+            .run(move |conn| {
+                use schema::favorite_stickers::dsl as f;
+                diesel::update(
+                    f::favorite_stickers
+                        .filter(f::device_id.eq(device_id))
+                        .filter(f::filehash.eq(&filehash)),
+                )
+                .set((
+                    f::direct_path.eq(&media.direct_path),
+                    f::media_key.eq(&media.media_key),
+                    f::file_enc_sha256.eq(&media.file_enc_sha256),
+                    f::file_length.eq(i64::try_from(media.file_length).unwrap_or(0)),
+                    f::mimetype.eq(&media.mime_type),
+                ))
+                .execute(conn)
+                .map(|_| ())
+                .map_err(db_err)
+            })
+            .await?)
+    }
+}
+
 fn tags_by_hash(
     conn: &mut SqliteConnection,
     device_id: i32,

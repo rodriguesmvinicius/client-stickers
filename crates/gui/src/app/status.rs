@@ -9,6 +9,8 @@
 //! they change rather than mirrored into a second copy that could disagree
 //! with the first.
 
+use std::collections::HashMap;
+
 use gpui::Context;
 use oxidezap_core::{MediaType, STATUS_BROADCAST_JID, StatusFeed};
 
@@ -177,6 +179,78 @@ fn apply_watched(
 }
 
 impl WhatsAppApp {
+    /// Remember a status author's picture once it has arrived, for an author
+    /// with no chat to keep it on. An empty key is WhatsApp saying there is
+    /// no picture; the placeholder is then the right drawing.
+    pub(super) fn note_status_avatar(&mut self, jid: String, key: String) {
+        if key.is_empty() {
+            self.status_avatars.remove(&jid);
+        } else {
+            self.status_avatars.insert(jid, key);
+        }
+    }
+
+    /// The picture to draw in each author's ring, keyed by the JID the feed
+    /// uses — empty for our own updates — and a demand for each one that is
+    /// not drawn yet.
+    ///
+    /// A contact's chat already carries their picture when there is one; the
+    /// rest are people known only from the broadcast, whose picture nothing
+    /// else on screen ever asked for.
+    pub(crate) fn status_avatar_keys(&mut self, feed: &StatusFeed) -> HashMap<String, String> {
+        use std::hash::{Hash, Hasher};
+        let own = self.account_jid.clone();
+        let mut keys = HashMap::new();
+        let mut demands = Vec::new();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.avatar_manager.demand_epoch().hash(&mut hasher);
+        for author in feed.mine().into_iter().chain(feed.authors()) {
+            let jid = if author.jid.is_empty() {
+                match own.clone() {
+                    Some(own) => own,
+                    None => continue,
+                }
+            } else {
+                author.jid.clone()
+            };
+            // Our own account announces itself as a device JID; the picture
+            // belongs to the user, whose JID carries no device.
+            let jid = match jid.split_once(':') {
+                Some((user, rest)) => match rest.split_once('@') {
+                    Some((_, server)) => format!("{user}@{server}"),
+                    None => jid,
+                },
+                None => jid,
+            };
+            let chat = self.find_chat(&jid);
+            let picture_id = chat.and_then(|c| c.avatar_picture_id.clone());
+            let key = chat
+                .and_then(|c| c.avatar_cache_key.clone())
+                .or_else(|| self.status_avatars.get(&jid).cloned());
+            jid.hash(&mut hasher);
+            key.hash(&mut hasher);
+            if let Some(key) = &key {
+                keys.insert(author.jid.clone(), key.clone());
+            }
+            demands.push(crate::session::avatar::ChatDemand {
+                jid,
+                picture_id,
+                cache_key: key,
+            });
+        }
+        let fingerprint = hasher.finish();
+        if self.last_status_avatar_fingerprint != Some(fingerprint) {
+            self.last_status_avatar_fingerprint = Some(fingerprint);
+            for demand in &demands {
+                self.avatar_manager.demand_chat(demand);
+            }
+            if let Some(session) = &self.client {
+                self.avatar_manager.flush_demands(session);
+            }
+        }
+        keys
+    }
+
     pub fn destination(&self) -> Destination {
         self.destination
     }

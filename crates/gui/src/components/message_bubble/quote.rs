@@ -38,36 +38,49 @@ pub fn render_quote(
     // what carries focus and keyboard activation. Styled flat and full width,
     // because inside a bubble it has to read as the quote it is, not as a
     // control sitting on top of one.
+    //
+    // The panel is what separates the quote from the reply under it: a faint
+    // wash of the author's hue behind it, the bar at its edge, and a gap
+    // below. Without them the quoted text and the reply were one grey block.
     Button::new(SharedString::from(format!("quote-{target}")))
         .ghost()
         .w_full()
         .h_auto()
-        .flex()
-        .gap(metrics.space_md())
-        .py(metrics.space_xxs())
+        .p_0()
+        .mb(metrics.space_sm())
         .rounded(metrics.radius_sm())
         .child(
             div()
-                .w(metrics.selection_bar_width())
-                .flex_shrink_0()
-                .rounded_full()
-                .bg(hue),
-        )
-        .child(
-            parts::detail_stack()
-                .gap(metrics.space_xxs())
+                .w_full()
+                .flex()
+                .overflow_hidden()
+                .rounded(metrics.radius_sm())
+                .bg(hue.opacity(0.12))
                 .child(
                     div()
-                        .text_size(metrics.text_small())
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(hue)
-                        .child(name),
+                        .w(metrics.selection_bar_width() * 1.5)
+                        .flex_shrink_0()
+                        .bg(hue),
                 )
                 .child(
-                    parts::one_line()
-                        .text_size(metrics.text_secondary())
-                        .text_color(cx.theme().muted_foreground)
-                        .child(summary),
+                    parts::detail_stack()
+                        .gap(metrics.space_xxs())
+                        .px(metrics.space_md())
+                        .py(metrics.space_xs())
+                        .child(
+                            div()
+                                .text_size(metrics.text_small())
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(hue)
+                                .child(name),
+                        )
+                        .child(
+                            parts::one_line()
+                                .text_size(metrics.text_small())
+                                .italic()
+                                .text_color(cx.theme().muted_foreground.opacity(0.85))
+                                .child(summary),
+                        ),
                 ),
         )
         .cursor_pointer()

@@ -33,6 +33,8 @@ use oxidezap_core::ChatMessage;
 pub struct StatusViewProps {
     pub author_jid: String,
     pub author_name: SharedString,
+    /// The author's picture, when one has arrived.
+    pub author_avatar: Option<String>,
     pub message: ChatMessage,
     pub image: Option<RetainedImage>,
     /// A video update's current decoded frame, when one has been produced.
@@ -170,6 +172,7 @@ fn render_header(
                 &props.author_name,
                 avatar - metrics.space_sm(),
             )
+            .picture(props.author_avatar.clone(), None)
             .on(cx.theme().background),
         )
         .child(

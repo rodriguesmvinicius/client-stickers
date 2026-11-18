@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     revision();
+    windows_icon();
 
     let is_wasm = std::env::var("CARGO_CFG_TARGET_FAMILY")
         .is_ok_and(|families| families.split(',').any(|family| family == "wasm"));
@@ -175,4 +176,29 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
 fn copy(from: &Path, to: &Path) {
     std::fs::copy(from, to)
         .unwrap_or_else(|e| panic!("copying {} to {}: {e}", from.display(), to.display()));
+}
+
+/// Give `oxidezap.exe` its icon, which is also the window's: gpui loads icon
+/// resource 1 from the executable for every window it opens.
+fn windows_icon() {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/windows");
+    let rc = dir.join("oxidezap.rc");
+    println!("cargo:rerun-if-changed={}", rc.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        dir.join("oxidezap.ico").display()
+    );
+    if let Err(error) = embed_resource::compile_for(
+        &rc,
+        ["oxidezap"],
+        embed_resource::ParamsIncludeDirs([dir.as_os_str()]),
+    )
+    .manifest_optional()
+    {
+        // An icon is not worth failing a build over; say so and carry on.
+        println!("cargo:warning=the Windows icon was not embedded: {error}");
+    }
 }

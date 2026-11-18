@@ -47,9 +47,13 @@ fn inner_avatar(size: Pixels, thickness: Pixels, gap: Pixels) -> Pixels {
 ///
 /// `size` is the whole thing, avatar and ring together, so it drops into a row
 /// beside a bare avatar of the same size without moving anything.
+// Each argument is one plain fact about the row; a struct for them would be
+// built and torn apart again at the single call site.
+#[allow(clippy::too_many_arguments)]
 pub fn status_ring(
     identity: &str,
     name: &str,
+    picture: Option<String>,
     size: Pixels,
     count: usize,
     unseen: usize,
@@ -84,7 +88,11 @@ pub fn status_ring(
                 spent.opacity(0.7)
             })
         })
-        .child(Avatar::new(identity.to_string(), name, inner).on(ground))
+        .child(
+            Avatar::new(identity.to_string(), name, inner)
+                .picture(picture, None)
+                .on(ground),
+        )
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@
 //! once it has closed, which is what this side is for.
 
 use gpui::{Context, Entity, Window};
-use oxidezap_ipc::{StickerReply, StickerRequest};
+use oxidezap_ipc::StickerRequest;
 
 use super::WhatsAppApp;
 use super::notices::Tone;
@@ -85,7 +85,7 @@ impl WhatsAppApp {
         });
         cx.spawn(async move |app: gpui::WeakEntity<Self>, cx| {
             let outcome = match answer.await {
-                Ok(Ok(StickerReply::Done | StickerReply::Favorites { .. })) => Ok(()),
+                Ok(Ok(_)) => Ok(()),
                 Ok(Err(detail)) => Err(detail),
                 Err(_) => Err("the connection to the background service ended".to_string()),
             };

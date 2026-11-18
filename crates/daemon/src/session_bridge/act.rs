@@ -191,6 +191,38 @@ impl Bridge {
                 });
                 None
             }
+            Action::ForwardMessage {
+                id,
+                request,
+                answer_to,
+            } => {
+                let connection = self.hub.connection();
+                if !connection.is_connected() {
+                    answer_now(
+                        &answer_to,
+                        answered(
+                            id,
+                            Err(ProtocolError::NoSession {
+                                detail: format!("not connected: {connection:?}"),
+                            }),
+                        ),
+                    );
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    return None;
+                }
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let task = client.forward_message_to(request.jid, request.message_id, request.to);
+                oxidezap_session::spawn(async move {
+                    let result = mutation_answer(id, task.await);
+                    answer_now(&answer_to, answered(id, result));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::MarkStatusWatched(oxidezap_ipc::MarkStatusWatched { message_ids }) => {
                 // The other actions are finished when the session has taken
                 // them and what the network makes of them arrives later; this
@@ -1499,7 +1531,10 @@ impl Bridge {
         }
 
         match action {
-            Action::Wire { .. } | Action::EditMessage { .. } | Action::RevokeMessage { .. } => {
+            Action::Wire { .. }
+            | Action::EditMessage { .. }
+            | Action::RevokeMessage { .. }
+            | Action::ForwardMessage { .. } => {
                 unreachable!("addressed actions are handled in begin_slow")
             }
             Action::SendText(oxidezap_ipc::SendText {
@@ -2211,6 +2246,16 @@ fn sticker_task(
         ),
         StickerRequest::Unfavorite { filehash } => done(client.unfavorite_sticker(filehash)),
         StickerRequest::SetTags { filehash, tags } => done(client.set_sticker_tags(filehash, tags)),
+        StickerRequest::Repair { filehash } => {
+            let task = client.repair_favorite_sticker(filehash);
+            oxidezap_session::spawn(async move {
+                task.await
+                    .map_err(|_| "the session stopped".to_string())?
+                    .map(|sticker| StickerReply::Repaired {
+                        sticker: Box::new(sticker),
+                    })
+            })
+        }
         StickerRequest::Send { to, filehash } => {
             let task = client.send_favorite_sticker(to, filehash);
             oxidezap_session::spawn(async move {

@@ -331,38 +331,45 @@ impl WhatsAppClient {
     ) -> Task<Result<SendId, String>> {
         let session = self.session.clone();
         self.exec.spawn(async move {
-            let source: Jid = source_chat_jid
-                .parse()
-                .map_err(|_| "not a chat address".to_string())?;
-            let target: Jid = target_chat_jid
-                .parse()
-                .map_err(|_| "not a chat address".to_string())?;
             let Some(live) = session.lock().await.clone() else {
                 return Err("no session yet".to_string());
             };
-            let stored = live
-                .chat_store
-                .message(&source, &message_id)
-                .await
-                .map_err(|e| format!("database query failed: {e}"))?
-                .ok_or_else(|| "message not found".to_string())?;
-            let Some(proto) = stored.message.map(|boxed| *boxed) else {
-                return Err("that message has no forwardable content".to_string());
-            };
-            let result = live
-                .client
-                .forward_message(target.clone(), &proto)
-                .await
-                .map_err(|e| e.to_string())?;
-            if let Err(error) = live
-                .chat_store
-                .record_operation(&target, result.message_id.as_str())
-            {
-                log::warn!(
-                    "message was forwarded but its acknowledgement could not be tracked: {error}"
-                );
+            let proto = forwardable(&live, &source_chat_jid, &message_id).await?;
+            forward_one(&live, &proto, &target_chat_jid).await
+        })
+    }
+
+    /// Forward a stored message to each of `targets`, one after another.
+    ///
+    /// Every target is tried even when one fails, so a bad address among
+    /// several does not cost the others their copy; what failed is reported
+    /// together.
+    pub fn forward_message_to(
+        &self,
+        source_chat_jid: String,
+        message_id: String,
+        targets: Vec<String>,
+    ) -> Task<Result<(), String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            if targets.is_empty() {
+                return Err("no chat to forward to".to_string());
             }
-            Ok(result.message_id.into_string())
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let proto = forwardable(&live, &source_chat_jid, &message_id).await?;
+            let mut failures = Vec::new();
+            for target in &targets {
+                if let Err(error) = forward_one(&live, &proto, target).await {
+                    failures.push(format!("{target}: {error}"));
+                }
+            }
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("; "))
+            }
         })
     }
 
@@ -596,6 +603,62 @@ impl WhatsAppClient {
             }
         });
     }
+}
+
+/// The stored message at `message_id`, as it can be forwarded.
+async fn forwardable(
+    live: &super::Session,
+    source_chat_jid: &str,
+    message_id: &str,
+) -> Result<wa::Message, String> {
+    let source: Jid = source_chat_jid
+        .parse()
+        .map_err(|_| "not a chat address".to_string())?;
+    let stored = live
+        .chat_store
+        .message(&source, message_id)
+        .await
+        .map_err(|e| format!("database query failed: {e}"))?
+        .ok_or_else(|| "message not found".to_string())?;
+    stored
+        .message
+        .map(|boxed| *boxed)
+        .ok_or_else(|| "that message has no forwardable content".to_string())
+}
+
+/// Send one forwarded copy.
+///
+/// Prepared here rather than by the library's `forward_message` so the copy
+/// is written to the target chat under its own id before it goes, as every
+/// other send is: otherwise it appeared only once the phone echoed it back.
+async fn forward_one(
+    live: &super::Session,
+    proto: &wa::Message,
+    target_chat_jid: &str,
+) -> Result<SendId, String> {
+    use whatsapp_rust::wacore::proto_helpers::MessageExt;
+    let target: Jid = target_chat_jid
+        .parse()
+        .map_err(|_| "not a chat address".to_string())?;
+    let message = proto.get_base_message().prepare_for_forward();
+    let msg_id = live.client.generate_message_id();
+    super::record_outgoing(
+        &live.chat_store,
+        &target,
+        msg_id.as_str(),
+        &message,
+        &live.resolve_chat_names,
+    )?;
+    let options = whatsapp_rust::SendOptions::default().with_message_id(msg_id.clone());
+    if let Err(error) = live
+        .client
+        .send(whatsapp_rust::SendRequest::new(&target, message).with_options(options))
+        .await
+    {
+        super::mark_send_failed(&live.chat_store, &target, msg_id.as_str());
+        return Err(error.to_string());
+    }
+    Ok(msg_id.into_string())
 }
 
 #[cfg(test)]

@@ -117,6 +117,31 @@ pub fn render_reaction_picker(
                 });
             })
         }))
+        // Any other emoji, through the same picker the composer has. The
+        // window holds one; the strip is open under one message at a time.
+        .children(entity.read(cx).reaction_emoji().map(|(picker, open)| {
+            let toggle = entity.clone();
+            let focus = picker.read(cx).focus_handle(cx);
+            gpui_component::popover::Popover::new(SharedString::from(format!(
+                "react-more-{message_id}"
+            )))
+            .anchor(gpui::Anchor::BottomLeft)
+            .open(open)
+            .on_open_change(move |open, _, cx| {
+                toggle.update(cx, |app, cx| app.set_reaction_emoji_open(*open, cx));
+            })
+            .track_focus(&focus)
+            .trigger(
+                gpui_component::button::Button::new(SharedString::from(format!(
+                    "react-more-trigger-{message_id}"
+                )))
+                .ghost()
+                .xsmall()
+                .label("+")
+                .tooltip(crate::tr!(MoreReactions)),
+            )
+            .content(move |_, _, _| picker.clone())
+        }))
 }
 
 /// React, reply and copy, revealed on hover.

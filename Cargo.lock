@@ -6673,6 +6673,7 @@ dependencies = [
  "anyhow",
  "block2 0.6.2",
  "chrono",
+ "embed-resource",
  "emojis",
  "futures-channel",
  "futures-lite",

@@ -1,0 +1,3 @@
+// The window, taskbar and Explorer icon of oxidezap.exe. ID 1 is the one gpui
+// loads for the window (LoadImageW with resource 1).
+1 ICON "oxidezap.ico"

@@ -17,6 +17,11 @@ use super::WhatsAppClient;
 use super::sends::SentReceipt;
 use crate::exec::Task;
 
+/// Why a favorite whose file has gone cannot be brought back: no message on
+/// this device carries the sticker, so there is nothing to ask the phone for.
+const NO_SOURCE: &str = "its file has expired on WhatsApp's servers, and no message on this \
+     computer carries it to recover it from; receiving or sending the sticker again fixes it";
+
 /// A favorite to make or undo, as a message carried the sticker.
 #[derive(Debug, Clone)]
 pub struct StickerFavorite {
@@ -131,6 +136,101 @@ impl WhatsAppClient {
                 },
             )
             .await
+        })
+    }
+
+    /// Find a file that answers for a favorite whose recorded one does not.
+    ///
+    /// A favorite keeps the CDN path the phone had when it was favorited, and
+    /// the CDN forgets files (410). Two ways back, cheapest first: a newer
+    /// upload of the same sticker that a message carried, and — when that has
+    /// gone too — asking the phone to upload that message's file again, as
+    /// WhatsApp Web does for expired media. The favorite is pointed at
+    /// whichever answers, so the next load needs neither.
+    pub fn repair_favorite_sticker(
+        &self,
+        filehash: String,
+    ) -> Task<Result<FavoriteSticker, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let store = &live.chat_store;
+            let favorite = store
+                .favorite_sticker(&filehash)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "that sticker is not a favorite any more".to_string())?;
+            let Some(seen) = store
+                .sticker_seen(&filehash)
+                .await
+                .map_err(|e| e.to_string())?
+            else {
+                return Err(NO_SOURCE.to_string());
+            };
+            let repointed = |media: DownloadableMedia| {
+                let mut sticker = favorite.clone();
+                sticker.media = media;
+                sticker
+            };
+            if seen.media.direct_path != favorite.media.direct_path
+                && live
+                    .client
+                    .download(&seen.media, Default::default())
+                    .await
+                    .is_ok()
+            {
+                store
+                    .repoint_favorite_sticker(&filehash, &seen.media)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                return Ok(repointed(seen.media));
+            }
+            let chat: Jid = seen
+                .chat_jid
+                .parse()
+                .map_err(|_| "the message's chat address is not valid".to_string())?;
+            let sender: Option<Jid> = seen.sender_jid.parse().ok();
+            let participant = if !seen.from_me && super::paging::participant_keyed_chat(&chat) {
+                sender
+            } else {
+                None
+            };
+            let request = whatsapp_rust::features::MediaReuploadRequest {
+                target: whatsapp_rust::MessageRef::new(
+                    &chat,
+                    whatsapp_rust::MessageId::new(&seen.message_id).map_err(|e| e.to_string())?,
+                    participant.as_ref(),
+                    seen.from_me,
+                )
+                .map_err(|e| e.to_string())?,
+                media_key: seen
+                    .media
+                    .media_key
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| "media key must contain 32 bytes".to_string())?,
+            };
+            match live.client.media_reupload().request(&request).await {
+                Ok(whatsapp_rust::features::MediaRetryResult::Success { direct_path }) => {
+                    store
+                        .set_sticker_seen_path(&filehash, &direct_path)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let mut media = seen.media;
+                    media.direct_path = direct_path;
+                    store
+                        .repoint_favorite_sticker(&filehash, &media)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    Ok(repointed(media))
+                }
+                Ok(other) => Err(format!(
+                    "the phone could not upload it again ({other:?}); it may no longer have the file"
+                )),
+                Err(e) => Err(format!("the phone did not answer the re-upload request: {e}")),
+            }
         })
     }
 

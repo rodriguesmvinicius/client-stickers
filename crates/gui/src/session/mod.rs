@@ -91,8 +91,8 @@ use oxidezap_ipc::{CallAction, ClientRequest, Link, PageCursor, Request, Request
 // so `Typing` and `Download` read at the call site as what they are: the
 // request's own payload, built here and moved onto the wire unchanged.
 use oxidezap_ipc::{
-    Download, EditMessage, LoadChats, LoadMessages, MarkRead, MarkStatusWatched, RevokeMessage,
-    SendAudio, SendMedia, SendReaction, SendText, Typing, VotePoll,
+    Download, EditMessage, ForwardMessage, LoadChats, LoadMessages, MarkRead, MarkStatusWatched,
+    RevokeMessage, SendAudio, SendMedia, SendReaction, SendText, Typing, VotePoll,
 };
 use portable_atomic::AtomicU64;
 use tokio::sync::oneshot;
@@ -1139,6 +1139,25 @@ impl SessionHandle {
                 jid,
                 message_id,
                 for_everyone,
+            }),
+            Awaiting::Mutation(tx),
+        );
+        rx
+    }
+
+    /// Forward a stored message to each of `to`; answered once all are sent.
+    pub fn forward_message(
+        &self,
+        jid: String,
+        message_id: String,
+        to: Vec<String>,
+    ) -> oneshot::Receiver<Result<(), Failure>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::ForwardMessage(ForwardMessage {
+                jid,
+                message_id,
+                to,
             }),
             Awaiting::Mutation(tx),
         );

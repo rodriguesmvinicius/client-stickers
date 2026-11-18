@@ -222,3 +222,20 @@ diesel::table! {
         words -> Text,
     }
 }
+
+diesel::table! {
+    sticker_seen (device_id, filehash) {
+        device_id -> Integer,
+        filehash -> Text,
+        chat_jid -> Text,
+        message_id -> Text,
+        sender_jid -> Text,
+        from_me -> Bool,
+        direct_path -> Text,
+        media_key -> Binary,
+        file_enc_sha256 -> Binary,
+        file_length -> BigInt,
+        mimetype -> Text,
+        seen_at_ms -> BigInt,
+    }
+}

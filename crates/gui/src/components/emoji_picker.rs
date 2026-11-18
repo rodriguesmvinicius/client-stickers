@@ -23,9 +23,9 @@ const TONES: [SkinTone; 6] = [
     SkinTone::Dark,
 ];
 
-pub(super) struct EmojiPicked(pub &'static str);
+pub(crate) struct EmojiPicked(pub &'static str);
 
-pub(super) struct EmojiPicker {
+pub(crate) struct EmojiPicker {
     search: Entity<InputState>,
     matches: Vec<&'static Emoji>,
     tone: SkinTone,

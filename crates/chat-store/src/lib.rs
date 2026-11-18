@@ -54,7 +54,7 @@ pub use materialize::{
     supported_poll_creation_message,
 };
 pub use queries::MessageReadState;
-pub use sticker_queries::FavoriteWrite;
+pub use sticker_queries::{FavoriteWrite, SeenSticker};
 pub use store::ChatStore;
 pub use store::retirement::AccountRetirement;
 pub use store::shared_history::PendingHistoryBundle;

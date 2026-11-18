@@ -142,9 +142,27 @@ pub(crate) fn delete_favorite(
     .map(|_| ())
 }
 
-/// Remember the words a sticker message came with, so a favorite of the same
-/// sticker can be found by them. Best effort: the message is what matters.
-pub(super) fn note_hints(conn: &mut SqliteConnection, device_id: i32, message: &wa::Message) {
+/// Which message a sticker was seen in, for asking the phone to re-upload it.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct StickerOrigin<'a> {
+    pub chat: &'a str,
+    pub message_id: &'a str,
+    pub sender: &'a str,
+    pub from_me: bool,
+    pub at_ms: i64,
+}
+
+/// Remember what a sticker message says about its sticker: the words it came
+/// with (emojis, accessibility label) so a favorite can be found by them, and
+/// — when the message is known — where its file is and which message it was,
+/// so a favorite whose own CDN path has gone can be fetched through it.
+/// Best effort: the message is what matters.
+pub(super) fn note_sticker(
+    conn: &mut SqliteConnection,
+    device_id: i32,
+    message: &wa::Message,
+    origin: Option<StickerOrigin<'_>>,
+) {
     let base = crate::materialize::normalized_message(message);
     let sticker = base.sticker_message.as_option().or_else(|| {
         base.lottie_sticker_message
@@ -158,6 +176,12 @@ pub(super) fn note_hints(conn: &mut SqliteConnection, device_id: i32, message: &
     let Some(hash) = sticker.file_sha256.as_deref().filter(|h| h.len() == 32) else {
         return;
     };
+    let filehash = oxidezap_core::base64::encode(hash);
+    if let Some(origin) = origin
+        && let Err(error) = note_seen(conn, device_id, &filehash, sticker, origin)
+    {
+        log::warn!("chat-store: sticker source not recorded: {error}");
+    }
     let emojis: Vec<String> = sticker
         .emojis
         .as_deref()
@@ -172,7 +196,7 @@ pub(super) fn note_hints(conn: &mut SqliteConnection, device_id: i32, message: &
     if let Err(error) = diesel::insert_into(dsl::sticker_hints)
         .values((
             dsl::device_id.eq(device_id),
-            dsl::filehash.eq(oxidezap_core::base64::encode(hash)),
+            dsl::filehash.eq(&filehash),
             dsl::words.eq(&joined),
         ))
         .on_conflict((dsl::device_id, dsl::filehash))
@@ -182,6 +206,77 @@ pub(super) fn note_hints(conn: &mut SqliteConnection, device_id: i32, message: &
     {
         log::warn!("chat-store: sticker hints not recorded: {error}");
     }
+}
+
+/// Keep the newest message carrying this sticker. A backfilled older message
+/// never replaces a newer one: the newer upload is the likelier to be alive.
+fn note_seen(
+    conn: &mut SqliteConnection,
+    device_id: i32,
+    filehash: &str,
+    sticker: &wa::message::StickerMessage,
+    origin: StickerOrigin<'_>,
+) -> QueryResult<()> {
+    let (Some(direct_path), Some(media_key), Some(file_enc_sha256)) = (
+        sticker.direct_path.as_deref().filter(|p| !p.is_empty()),
+        sticker.media_key.as_deref().filter(|k| k.len() == 32),
+        sticker.file_enc_sha256.as_deref().filter(|h| h.len() == 32),
+    ) else {
+        return Ok(());
+    };
+    if origin.chat.is_empty() || origin.message_id.is_empty() {
+        return Ok(());
+    }
+    use schema::sticker_seen::dsl as s;
+    let file_length = sticker
+        .file_length
+        .and_then(|n| i64::try_from(n).ok())
+        .unwrap_or(0);
+    let mimetype = sticker
+        .mimetype
+        .as_deref()
+        .filter(|m| !m.is_empty())
+        .unwrap_or("image/webp");
+    let newer_known: Option<i64> = s::sticker_seen
+        .filter(s::device_id.eq(device_id))
+        .filter(s::filehash.eq(filehash))
+        .select(s::seen_at_ms)
+        .first(conn)
+        .optional()?;
+    if newer_known.is_some_and(|known| known > origin.at_ms) {
+        return Ok(());
+    }
+    diesel::insert_into(s::sticker_seen)
+        .values((
+            s::device_id.eq(device_id),
+            s::filehash.eq(filehash),
+            s::chat_jid.eq(origin.chat),
+            s::message_id.eq(origin.message_id),
+            s::sender_jid.eq(origin.sender),
+            s::from_me.eq(origin.from_me),
+            s::direct_path.eq(direct_path),
+            s::media_key.eq(media_key),
+            s::file_enc_sha256.eq(file_enc_sha256),
+            s::file_length.eq(file_length),
+            s::mimetype.eq(mimetype),
+            s::seen_at_ms.eq(origin.at_ms),
+        ))
+        .on_conflict((s::device_id, s::filehash))
+        .do_update()
+        .set((
+            s::chat_jid.eq(origin.chat),
+            s::message_id.eq(origin.message_id),
+            s::sender_jid.eq(origin.sender),
+            s::from_me.eq(origin.from_me),
+            s::direct_path.eq(direct_path),
+            s::media_key.eq(media_key),
+            s::file_enc_sha256.eq(file_enc_sha256),
+            s::file_length.eq(file_length),
+            s::mimetype.eq(mimetype),
+            s::seen_at_ms.eq(origin.at_ms),
+        ))
+        .execute(conn)
+        .map(|_| ())
 }
 
 #[cfg(test)]

@@ -165,6 +165,11 @@ impl WhatsAppApp {
                     chat.ready_avatar(key);
                     self.invalidate_chat_cache();
                     cx.notify();
+                } else {
+                    // Someone known only from their status: the ring is the
+                    // one place that draws them.
+                    self.note_status_avatar(jid, key);
+                    cx.notify();
                 }
             }
             UiEvent::AvatarFailed { jid, retryable } => {

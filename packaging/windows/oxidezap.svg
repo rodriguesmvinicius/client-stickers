@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- OxideZap desktop icon: an original blue-grey speech balloon with three
+       "typing" dots. Not derived from any other product's logo. -->
+  <defs>
+    <linearGradient id="fill" gradientUnits="userSpaceOnUse" x1="0" y1="12" x2="0" y2="244">
+      <stop offset="0" stop-color="#7593AB"/>
+      <stop offset="1" stop-color="#4B6579"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#fill)">
+    <circle cx="132" cy="120" r="108"/>
+    <path d="M44 172 L14 244 L96 214 Z" stroke="url(#fill)" stroke-width="10" stroke-linejoin="round"/>
+  </g>
+  <circle cx="132" cy="120" r="94" fill="none" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="6"/>
+  <g fill="#FFFFFF">
+    <circle cx="86" cy="120" r="17"/>
+    <circle cx="132" cy="120" r="17"/>
+    <circle cx="178" cy="120" r="17"/>
+  </g>
+</svg>

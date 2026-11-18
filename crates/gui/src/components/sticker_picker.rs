@@ -29,13 +29,13 @@ use crate::retained_image::RetainedImage;
 use crate::session::SessionHandle;
 use crate::theme::ActiveProductTheme as _;
 
-const COLUMNS: usize = 5;
+const COLUMNS: usize = 4;
 /// How many pictures are fetched at once. The daemon refuses past its own
 /// permit budget, and a popover of thumbnails is not worth crowding out a
 /// download somebody clicked.
 const IN_FLIGHT: usize = 4;
 /// How many rows of the grid are tall.
-const VISIBLE_ROWS: f32 = 4.;
+const VISIBLE_ROWS: f32 = 3.2;
 
 /// A favorite was clicked: send it, by its hash.
 pub(super) struct StickerPicked(pub String);
@@ -59,6 +59,9 @@ pub(super) struct StickerPicker {
     thumbs: HashMap<String, Thumb>,
     queue: VecDeque<String>,
     in_flight: usize,
+    /// Favorites already sent for repair in this opening, so a file that
+    /// cannot be found anywhere is asked about once rather than in a loop.
+    repairing: HashSet<String>,
     /// The sticker whose tags are being edited, by hash.
     editing: Option<String>,
     status: Option<SharedString>,
@@ -103,6 +106,7 @@ impl StickerPicker {
             thumbs: HashMap::new(),
             queue: VecDeque::new(),
             in_flight: 0,
+            repairing: HashSet::new(),
             editing: None,
             status: None,
             loaded: false,
@@ -127,6 +131,7 @@ impl StickerPicker {
             // on the old one deserve another try.
             self.thumbs
                 .retain(|_, thumb| matches!(thumb, Thumb::Ready(_)));
+            self.repairing.clear();
         }
         self.request_list(StickerRequest::List, cx);
         if !self.resynced {
@@ -166,7 +171,7 @@ impl StickerPicker {
                         this.favorites = stickers;
                         this.filter(cx);
                     }
-                    Ok(Ok(StickerReply::Done)) => {}
+                    Ok(Ok(StickerReply::Done | StickerReply::Repaired { .. })) => {}
                     Ok(Err(detail)) => {
                         log::warn!("stickers: {detail}");
                         if resync {
@@ -245,6 +250,16 @@ impl StickerPicker {
                             gpui::Image::from_bytes(gpui::ImageFormat::Webp, bytes.to_vec()),
                         )),
                         Ok(Ok(_)) => Thumb::Failed("the file came back empty".into()),
+                        Ok(Err(failure)) if this.repairing.insert(hash.clone()) => {
+                            // Usually a CDN path that has gone (410): ask for
+                            // one that answers, once.
+                            log::info!(
+                                "sticker picture unavailable, repairing: {}",
+                                failure.detail
+                            );
+                            this.repair(hash.clone(), cx);
+                            Thumb::Loading
+                        }
                         Ok(Err(failure)) => {
                             log::warn!("sticker picture unavailable: {}", failure.detail);
                             Thumb::Failed(failure.detail.clone().into())
@@ -258,6 +273,43 @@ impl StickerPicker {
             })
             .detach();
         }
+    }
+
+    fn repair(&mut self, filehash: String, cx: &mut gpui::Context<Self>) {
+        let Some(session) = &self.session else {
+            return;
+        };
+        let answer = session.stickers(StickerRequest::Repair {
+            filehash: filehash.clone(),
+        });
+        cx.spawn(async move |this: gpui::WeakEntity<Self>, cx| {
+            let answer = answer.await;
+            let _ = this.update(cx, |this, cx| {
+                match answer {
+                    Ok(Ok(StickerReply::Repaired { sticker })) => {
+                        if let Some(slot) =
+                            this.favorites.iter_mut().find(|s| s.filehash == filehash)
+                        {
+                            slot.media = sticker.media;
+                        }
+                        this.thumbs.remove(&filehash);
+                        this.want(&filehash);
+                        this.pump(cx);
+                    }
+                    Ok(Err(detail)) => {
+                        this.thumbs.insert(filehash, Thumb::Failed(detail.into()));
+                    }
+                    _ => {
+                        this.thumbs.insert(
+                            filehash,
+                            Thumb::Failed("the repair did not come back".into()),
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn begin_edit(
@@ -456,7 +508,9 @@ impl Render for StickerPicker {
             });
         }
         let metrics = cx.product().metrics;
-        let cell = metrics.icon_button() * 2.;
+        // Four to a row at half again the old size, which with 3.2 rows on
+        // screen makes the popover a fifth wider and taller than five at 2x.
+        let cell = metrics.icon_button() * 3.;
         let editing = self.editing.clone();
         let count = self.favorites.len();
         let failed = self

@@ -347,6 +347,9 @@ impl WhatsAppApp {
         if self.cancel_message_delete(cx) {
             return;
         }
+        if self.cancel_forward(cx) {
+            return;
+        }
         if self.cancel_paste_preview(cx) {
             return;
         }
