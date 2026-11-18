@@ -58,6 +58,7 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
     let media = base_message.and_then(|message| media::media_of(message, None));
     let poll = base_message.and_then(poll_of);
     let business = base_message.and_then(oxidezap_chat_store::business_content);
+    let link_preview = base_message.and_then(link_preview_of);
     let contacts = base_message.and_then(oxidezap_chat_store::shared_contacts_text);
     let pack = base_message.and_then(oxidezap_chat_store::sticker_pack_text);
     let content = match (&stored.text, stored.revoked) {
@@ -130,6 +131,7 @@ pub(super) fn stored_to_chat_message(stored: oxidezap_chat_store::StoredMessage)
         system,
         poll,
         business,
+        link_preview,
     }
 }
 
@@ -267,6 +269,46 @@ pub(super) fn account_event(client: &Arc<Client>) -> UiEvent {
         jid: device.pn.as_ref().map(ToString::to_string),
         lid: device.lid.as_ref().map(ToString::to_string),
     }
+}
+
+/// The link card the sender's phone embedded in a text, if it made one.
+///
+/// Read from the message rather than fetched: WhatsApp carries the title,
+/// description and a small JPEG in `extendedTextMessage`, and drawing those
+/// asks nothing of the linked site. A card with nothing but the link in it is
+/// no card — the link is already in the text.
+pub(super) fn link_preview_of(message: &wa::Message) -> Option<oxidezap_core::LinkPreview> {
+    /// A card's description is two lines of small print; the rest of a long
+    /// one is carried for nothing.
+    const DESCRIPTION_CHARS: usize = 300;
+    /// The inline picture is a thumbnail. Anything claiming to be one at this
+    /// size is not, and is not drawn.
+    const THUMBNAIL_BYTES: usize = 256 * 1024;
+
+    let text = message.extended_text_message.as_option()?;
+    let url = text
+        .matched_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty())?
+        .to_string();
+    let clean = |value: Option<&str>| value.map(str::trim).unwrap_or_default().to_string();
+    let mut description = clean(text.description.as_deref());
+    if let Some((cut, _)) = description.char_indices().nth(DESCRIPTION_CHARS) {
+        description.truncate(cut);
+        description.push('…');
+    }
+    let preview = oxidezap_core::LinkPreview {
+        url,
+        title: clean(text.title.as_deref()),
+        description,
+        thumbnail: text
+            .jpeg_thumbnail
+            .as_ref()
+            .filter(|bytes| !bytes.is_empty() && bytes.len() <= THUMBNAIL_BYTES)
+            .map(|bytes| Arc::new(bytes.clone())),
+    };
+    preview.is_worth_showing().then_some(preview)
 }
 
 #[cfg(test)]
@@ -623,5 +665,47 @@ mod business_tests {
         assert_eq!(messages[0].content, "Group membership changed");
         assert!(messages[0].is_read);
         assert!(messages[0].system.is_some());
+    }
+
+    fn linked(title: Option<&str>, thumbnail: Option<Vec<u8>>) -> wa::Message {
+        let mut message = wa::Message::default();
+        message.extended_text_message = MessageField::some({
+            let mut text = wa::message::ExtendedTextMessage::default();
+            text.text = Some("olha https://www.example.invalid/v/1".into());
+            text.matched_text = Some("https://www.example.invalid/v/1".into());
+            text.title = title.map(str::to_owned);
+            text.description = Some("x".repeat(400));
+            text.jpeg_thumbnail = thumbnail;
+            text
+        });
+        message
+    }
+
+    /// The card is the phone's: title, a trimmed description and its JPEG,
+    /// for the link it matched.
+    #[test]
+    fn an_embedded_link_card_is_read_from_the_message() {
+        let preview = link_preview_of(&linked(Some(" Um vídeo "), Some(vec![0xFF, 0xD8])))
+            .expect("a card with a title is shown");
+        assert_eq!(preview.url, "https://www.example.invalid/v/1");
+        assert_eq!(preview.title, "Um vídeo");
+        assert_eq!(preview.description.chars().count(), 301);
+        assert_eq!(preview.thumbnail.as_deref(), Some(&vec![0xFF, 0xD8]));
+        assert_eq!(preview.site(), "example.invalid");
+    }
+
+    /// A link with no card in it, or plain text, gets none.
+    #[test]
+    fn a_link_without_a_card_has_no_preview() {
+        let mut bare = linked(None, None);
+        bare.extended_text_message
+            .as_option_mut()
+            .unwrap()
+            .description = None;
+        assert!(link_preview_of(&bare).is_none());
+
+        let mut plain = wa::Message::default();
+        plain.conversation = Some("oi".into());
+        assert!(link_preview_of(&plain).is_none());
     }
 }

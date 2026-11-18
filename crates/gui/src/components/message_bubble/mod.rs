@@ -8,6 +8,7 @@
 
 pub mod audio;
 pub(crate) mod business;
+mod link_card;
 mod media;
 mod poll;
 mod quote;
@@ -29,6 +30,7 @@ use gpui_component::{Sizable as _, h_flex, v_flex};
 pub use audio::SPEEDS;
 pub use system::render_encryption_notice;
 
+use link_card::render_link_card;
 use media::{MediaProps, render_media_content};
 pub(crate) use media::{decode_sticker, decode_sticker_fitted, sticker_payload_is_valid};
 use poll::render_poll;
@@ -307,6 +309,23 @@ pub fn render_message_bubble(
                                         cx,
                                     )
                                 }))
+                                // The phone's card for the link in the text.
+                                // Not over media: a photo's caption link is
+                                // the photo's business, and the card would
+                                // stack a second picture on the first.
+                                .children(
+                                    message
+                                        .link_preview
+                                        .as_ref()
+                                        .filter(|preview| {
+                                            message.media.is_none()
+                                                && !message.revoked
+                                                && preview.is_worth_showing()
+                                        })
+                                        .map(|preview| {
+                                            render_link_card(preview, &message_id, metrics, cx)
+                                        }),
+                                )
                                 .when_some(message.media.clone(), |el, media_content| {
                                     render_media_content(
                                         el,

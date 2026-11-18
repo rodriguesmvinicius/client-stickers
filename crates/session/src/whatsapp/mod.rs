@@ -2418,6 +2418,7 @@ impl WhatsAppClient {
             system: None,
             poll,
             business,
+            link_preview: convert::link_preview_of(base_msg),
         };
 
         if let Some(media) = media_result {

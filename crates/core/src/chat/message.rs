@@ -68,6 +68,73 @@ pub struct ChatMessage {
     /// Display-only template, interactive card or business response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub business: Option<crate::BusinessContent>,
+    /// The card the sender's phone made for the first link in the text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_preview: Option<LinkPreview>,
+}
+
+/// A link's preview, as the sending phone built it: WhatsApp puts the page's
+/// title, description and a small picture in the message itself, so showing
+/// it fetches nothing — no request reaches the linked site from here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkPreview {
+    /// The link the card is for, as it appears in the text.
+    pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// The JPEG the phone embedded. Small — a few kilobytes — so it travels
+    /// in the frame rather than through the media cache.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "thumbnail_base64"
+    )]
+    pub thumbnail: Option<std::sync::Arc<Vec<u8>>>,
+}
+
+impl LinkPreview {
+    /// Whether there is anything to draw beyond the link itself.
+    #[must_use]
+    pub fn is_worth_showing(&self) -> bool {
+        !self.title.is_empty() || !self.description.is_empty() || self.thumbnail.is_some()
+    }
+
+    /// The site's name for the card's small print: the host, without `www.`.
+    #[must_use]
+    pub fn site(&self) -> &str {
+        let rest = self
+            .url
+            .split_once("://")
+            .map_or(self.url.as_str(), |(_, rest)| rest);
+        let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+        host.strip_prefix("www.").unwrap_or(host)
+    }
+}
+
+mod thumbnail_base64 {
+    use serde::{Deserialize as _, Deserializer, Serializer};
+    use std::sync::Arc;
+
+    #[allow(clippy::ref_option)]
+    pub fn serialize<S: Serializer>(
+        bytes: &Option<Arc<Vec<u8>>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match bytes {
+            Some(bytes) => serializer.serialize_str(&crate::base64::encode(bytes)),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Arc<Vec<u8>>>, D::Error> {
+        Ok(Option::<String>::deserialize(deserializer)?
+            .and_then(|text| crate::base64::decode(&text))
+            .map(Arc::new))
+    }
 }
 
 /// What a failed message can be sent again as.
@@ -132,6 +199,7 @@ impl ChatMessage {
             system: None,
             poll: None,
             business: None,
+            link_preview: None,
         }
     }
 
@@ -165,6 +233,7 @@ impl ChatMessage {
             system: None,
             poll: None,
             business: None,
+            link_preview: None,
         }
     }
 
@@ -397,5 +466,31 @@ mod tests {
         let mut text = ChatMessage::new_outgoing("m".into(), "hi".into());
         text.status = MessageStatus::Failed;
         assert!(matches!(text.resend(), Some(Resend::Text("hi"))));
+    }
+
+    /// The picture rides in the frame as text, and comes back as the same
+    /// bytes; a preview without one stays without one.
+    #[test]
+    fn a_link_preview_crosses_the_wire_whole() {
+        let mut message = ChatMessage::new_incoming("m".into(), "a".into(), "see this".into());
+        message.link_preview = Some(LinkPreview {
+            url: "https://www.example.invalid/watch?v=1".into(),
+            title: "A title".into(),
+            description: String::new(),
+            thumbnail: Some(std::sync::Arc::new(vec![0xFF, 0xD8, 0, 7])),
+        });
+        let json = serde_json::to_string(&message).unwrap();
+        let back: ChatMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.link_preview, message.link_preview);
+        assert_eq!(
+            back.link_preview.as_ref().unwrap().site(),
+            "example.invalid"
+        );
+
+        message.link_preview.as_mut().unwrap().thumbnail = None;
+        let json = serde_json::to_string(&message).unwrap();
+        assert!(!json.contains("thumbnail"));
+        let back: ChatMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.link_preview, message.link_preview);
     }
 }

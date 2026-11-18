@@ -2053,6 +2053,7 @@ fn alias_history_unread_deduplicates_only_matching_messages() {
         system: None,
         poll: None,
         business: None,
+        link_preview: None,
     };
     let mut chat = Chat::new("111222333444555@lid".to_string());
     chat.messages = vec![message("MSG-A"), message("MSG-B")];
@@ -2098,6 +2099,7 @@ fn watched_updates_come_back_watched() {
         system: None,
         poll: None,
         business: None,
+        link_preview: None,
     };
     let mut broadcast = Chat::new(oxidezap_core::STATUS_BROADCAST_JID.to_string());
     broadcast.messages = vec![
