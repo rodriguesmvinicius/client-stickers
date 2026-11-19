@@ -2831,7 +2831,7 @@ async fn a_send_before_the_session_is_up_still_fails_its_bubble() {
     let mut events = client.take_events().expect("the event stream");
 
     client
-        .send_message(TEST_PEER, "oi", "local-1".to_string(), None)
+        .send_message(TEST_PEER, "oi", "local-1".to_string(), None, None)
         .await
         .expect("the send task runs");
 
@@ -3961,4 +3961,46 @@ fn history_backfill_wait_detects_older_rows_without_count_growth() {
             ..before
         }
     ));
+}
+
+/// A text with a card goes out as the phone sends one; a card whose link was
+/// edited out of the text, or no card at all, leaves a plain `conversation`.
+#[test]
+fn a_link_card_rides_in_an_extended_text_only_while_its_link_is_in_it() {
+    // A 2×1 JPEG, so the dimensions the message states are real ones.
+    let mut jpeg = Vec::new();
+    image::RgbImage::new(2, 1)
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpeg),
+            image::ImageFormat::Jpeg,
+        )
+        .expect("encode");
+    let preview = oxidezap_core::LinkPreview {
+        url: "https://example.invalid/v/1".into(),
+        title: "Um vídeo".into(),
+        description: String::new(),
+        thumbnail: Some(Arc::new(jpeg.clone())),
+    };
+
+    let sent = super::text_message("olha https://example.invalid/v/1", None, Some(&preview));
+    let text = sent.extended_text_message.as_option().expect("extended");
+    assert_eq!(
+        text.matched_text.as_deref(),
+        Some("https://example.invalid/v/1")
+    );
+    assert_eq!(text.title.as_deref(), Some("Um vídeo"));
+    assert_eq!(text.description, None);
+    assert_eq!(text.jpeg_thumbnail.as_deref(), Some(jpeg.as_slice()));
+    assert_eq!(
+        (text.thumbnail_width, text.thumbnail_height),
+        (Some(2), Some(1))
+    );
+    assert!(sent.conversation.is_none());
+
+    let edited = super::text_message("nada aqui", None, Some(&preview));
+    assert_eq!(edited.conversation.as_deref(), Some("nada aqui"));
+    assert!(edited.extended_text_message.as_option().is_none());
+
+    let plain = super::text_message("oi", None, None);
+    assert_eq!(plain.conversation.as_deref(), Some("oi"));
 }

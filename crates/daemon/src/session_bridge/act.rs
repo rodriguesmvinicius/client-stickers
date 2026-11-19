@@ -1542,6 +1542,7 @@ impl Bridge {
                 text,
                 local_id,
                 quoted,
+                link_preview,
             }) => {
                 let Some(permit) = self.permit() else {
                     return too_busy();
@@ -1558,6 +1559,7 @@ impl Bridge {
                         &text,
                         local_id.unwrap_or_else(next_local_id),
                         quoted,
+                        link_preview,
                     )],
                 );
                 CommandOutcome::Accepted
@@ -2704,6 +2706,7 @@ mod tests {
             text: "oi".to_string(),
             local_id: None,
             quoted: None,
+            link_preview: None,
         })
     }
 

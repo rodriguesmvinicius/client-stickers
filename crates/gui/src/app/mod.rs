@@ -17,6 +17,7 @@ mod commands;
 pub(crate) mod editing;
 mod events;
 mod forward;
+mod link_preview;
 pub use editing::EditMessage;
 #[cfg(test)]
 mod frame_cost;
@@ -3348,6 +3349,9 @@ impl WhatsAppApp {
             InputAreaEvent::SendSticker(filehash) => {
                 self.send_favorite_sticker(filehash.clone(), cx);
             }
+            InputAreaEvent::WantLinkPreview(link) => {
+                self.fetch_link_preview(link.clone(), cx);
+            }
             InputAreaEvent::StartedTyping => {
                 // Send "composing" presence
                 if let Some(jid) = &self.selected_chat {
@@ -3399,7 +3403,13 @@ impl WhatsAppApp {
         // Taken, not read: a reply is answered once. Leaving the draft in
         // place quoted the same message from every message that followed.
         let quoted = self.reply_to.take().map(QuotedMessage::from);
-        self.send_quoted(text, quoted, cx);
+        // The card the composer showed for the link in this text, if the
+        // person left it there.
+        let link_preview = self
+            .input_area
+            .as_ref()
+            .and_then(|input| input.update(cx, |view, _| view.take_link_preview(text)));
+        self.send_quoted(text, quoted, link_preview, cx);
     }
 
     /// Send `text`, quoting whatever the caller says it quotes.
@@ -3408,7 +3418,13 @@ impl WhatsAppApp {
     /// the *original* message's quote: retrying is presented as sending the
     /// failed message again, and the reply draft that produced it was
     /// consumed when it was first sent.
-    fn send_quoted(&mut self, text: &str, quoted: Option<QuotedMessage>, cx: &mut Context<Self>) {
+    fn send_quoted(
+        &mut self,
+        text: &str,
+        quoted: Option<QuotedMessage>,
+        link_preview: Option<oxidezap_core::LinkPreview>,
+        cx: &mut Context<Self>,
+    ) {
         // Check if connected before attempting to send
         if !self.is_connected() {
             warn!("Cannot send message: not connected");
@@ -3424,7 +3440,13 @@ impl WhatsAppApp {
             warn!("Cannot send message: client is unavailable");
             return;
         };
-        client.send_message(&jid, text, local_id.clone(), quoted.clone());
+        client.send_message(
+            &jid,
+            text,
+            local_id.clone(),
+            quoted.clone(),
+            link_preview.clone(),
+        );
 
         // Add to local chat immediately for responsiveness; the client renames
         // it to the real id via MessageIdAssigned.
@@ -3432,6 +3454,8 @@ impl WhatsAppApp {
         // The bubble shows its own quote from the moment it is drawn, the way
         // the reply will look once it comes back from the store.
         msg.quoted = quoted;
+        // And its card, as the recipient will see it.
+        msg.link_preview = link_preview.filter(|preview| text.contains(preview.url.as_str()));
         if self.add_message_to_chat(&jid, msg, cx) {
             self.scroll_to_last_message();
         }

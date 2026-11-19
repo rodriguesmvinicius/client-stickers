@@ -2651,6 +2651,7 @@ impl WhatsAppClient {
         content: &str,
         local_id: String,
         quoted: Option<oxidezap_core::QuotedMessage>,
+        link_preview: Option<oxidezap_core::LinkPreview>,
     ) -> Task<()> {
         let session = self.session.clone();
         let ui_sender = self.ui_sender.clone();
@@ -2676,29 +2677,10 @@ impl WhatsAppClient {
             let live = session.lock().await.clone();
             if let Some(live) = live {
                 let client = &live.client;
-                // A reply is the same send with a quote attached, which the
-                // wire carries as an extended text message: a bare
-                // `conversation` has nowhere to put the context.
-                let message = match &quoted {
-                    Some(quoted) => {
-                        let mut constructed: wa::Message = Default::default();
-                        constructed.extended_text_message =
-                            whatsapp_rust::buffa::MessageField::some({
-                                let mut constructed: wa::message::ExtendedTextMessage =
-                                    Default::default();
-                                constructed.text = Some(content.clone());
-                                constructed.context_info =
-                                    whatsapp_rust::buffa::MessageField::some(quote_context(quoted));
-                                constructed
-                            });
-                        constructed
-                    }
-                    None => {
-                        let mut constructed: wa::Message = Default::default();
-                        constructed.conversation = Some(content.clone());
-                        constructed
-                    }
-                };
+                // A reply, or a link with its card, is the same send as an
+                // extended text message: a bare `conversation` has nowhere to
+                // put the context or the card.
+                let message = text_message(&content, quoted.as_ref(), link_preview.as_ref());
 
                 // Record BEFORE sending: the server ack event fires during
                 // send_message, so a row recorded after it would stay
@@ -3533,4 +3515,48 @@ mod outgoing_admission_tests {
         let stopped = record_outgoing(&store, &chat, "STOPPED", &message, &names).unwrap_err();
         assert!(stopped.contains("writer stopped"), "{stopped}");
     }
+}
+
+/// The wire message for a text: a bare `conversation` when it is only text,
+/// an `extendedTextMessage` when it quotes something or carries a link's card.
+///
+/// The card goes out the way a phone sends one — the matched link, the
+/// page's title and description, and the small JPEG — so the recipient draws
+/// it from the message alone.
+pub(crate) fn text_message(
+    content: &str,
+    quoted: Option<&oxidezap_core::QuotedMessage>,
+    link_preview: Option<&oxidezap_core::LinkPreview>,
+) -> wa::Message {
+    let mut message: wa::Message = Default::default();
+    // A card for a link the text no longer contains would describe a page
+    // the message does not mention.
+    let link_preview = link_preview.filter(|preview| content.contains(preview.url.as_str()));
+    if quoted.is_none() && link_preview.is_none() {
+        message.conversation = Some(content.to_string());
+        return message;
+    }
+    let mut text: wa::message::ExtendedTextMessage = Default::default();
+    text.text = Some(content.to_string());
+    if let Some(quoted) = quoted {
+        text.context_info = whatsapp_rust::buffa::MessageField::some(quote_context(quoted));
+    }
+    if let Some(preview) = link_preview {
+        text.matched_text = Some(preview.url.clone());
+        text.title = (!preview.title.is_empty()).then(|| preview.title.clone());
+        text.description = (!preview.description.is_empty()).then(|| preview.description.clone());
+        if let Some(thumbnail) = &preview.thumbnail {
+            if let Ok(size) = image::ImageReader::new(std::io::Cursor::new(thumbnail.as_slice()))
+                .with_guessed_format()
+                .map_err(|_| ())
+                .and_then(|reader| reader.into_dimensions().map_err(|_| ()))
+            {
+                text.thumbnail_width = Some(size.0);
+                text.thumbnail_height = Some(size.1);
+            }
+            text.jpeg_thumbnail = Some(thumbnail.as_ref().clone());
+        }
+    }
+    message.extended_text_message = whatsapp_rust::buffa::MessageField::some(text);
+    message
 }

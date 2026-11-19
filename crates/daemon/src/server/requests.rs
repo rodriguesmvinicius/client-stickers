@@ -285,6 +285,26 @@ pub(super) async fn handle_request(
             )
             .await
         }
+        // Answered under this id when the page has been read, which takes as
+        // long as the site does: off the connection, so typing a link never
+        // holds up anything else this window asked for.
+        ClientRequest::LinkPreview(request) => {
+            let id = match addressed(id, "a link preview needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            let outbox = outbox.clone();
+            oxidezap_session::spawn(async move {
+                let result = crate::link_preview::fetch(request.url)
+                    .await
+                    .map(|preview| preview.map(Box::new));
+                if let Ok(frame) = serde_json::to_string(&DaemonMessage::LinkPreview { id, result })
+                {
+                    let _ = outbox.send(frame).await;
+                }
+            });
+            Answer::frame(None)
+        }
         ClientRequest::ForgetSession => acted(
             dispatch(
                 hub,

@@ -292,7 +292,8 @@ use std::path::PathBuf;
 /// favorite stickers synced with the phone, and hashtags filed against them
 /// on this device. A v42 daemon would refuse the request as malformed.
 /// 44 adds `ClientRequest::ForwardMessage`, answered under its id.
-pub const PROTOCOL_VERSION: u32 = 44;
+/// 45 adds `ClientRequest::LinkPreview` and the card a `SendText` carries.
+pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

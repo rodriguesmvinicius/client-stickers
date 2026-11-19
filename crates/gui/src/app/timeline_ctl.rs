@@ -145,6 +145,8 @@ impl WhatsAppApp {
         // it was consumed by the first send, so the quote has to come from
         // the message itself.
         let quoted = message.quoted.clone();
+        // And its link card, which the composer had and nothing else does.
+        let link_preview = message.link_preview.clone();
         // Lifted off the chat before sending, which needs `self` mutably.
         let again = match again {
             Resend::Text(text) => Retry::Text(text.to_owned()),
@@ -154,7 +156,7 @@ impl WhatsAppApp {
         let _ = window;
 
         match again {
-            Retry::Text(content) => self.send_quoted(&content, quoted, cx),
+            Retry::Text(content) => self.send_quoted(&content, quoted, link_preview, cx),
             Retry::VoiceNote(media) => {
                 self.send_voice_note(
                     cx,

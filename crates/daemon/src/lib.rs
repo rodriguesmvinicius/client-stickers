@@ -20,6 +20,7 @@ pub mod account;
 pub mod avatar;
 mod claim;
 pub mod embedded;
+pub mod link_preview;
 pub mod media;
 /// The plugin host, wired to the hub and the command channel.
 ///

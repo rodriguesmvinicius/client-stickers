@@ -8,6 +8,8 @@ mod chat_list;
 mod conversation_search;
 mod emoji_picker;
 pub(crate) use emoji_picker::{EmojiPicked, EmojiPicker};
+mod composer_link;
+pub(crate) use composer_link::fetchable as fetchable_link;
 mod empty_state;
 mod forward_picker;
 pub(crate) use forward_picker::{ForwardEvent, ForwardPicker, ForwardTarget};

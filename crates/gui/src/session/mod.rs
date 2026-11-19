@@ -311,6 +311,8 @@ enum Awaiting {
     CallDevices(oneshot::Sender<Result<oxidezap_ipc::CallDeviceReply, String>>),
     /// Favorite stickers for the picker, or the result of changing one.
     Stickers(oneshot::Sender<Result<oxidezap_ipc::StickerReply, String>>),
+    /// The card for a link typed into the composer.
+    LinkPreview(oneshot::Sender<Result<Option<oxidezap_core::LinkPreview>, String>>),
     /// A message drawn before it was sent. On refusal it has to stop being
     /// pending, and the front end is the side that knows which bubble it is.
     Send {
@@ -385,6 +387,7 @@ impl Awaiting {
             Self::Storage(tx) => tx.is_closed(),
             Self::CallDevices(tx) => tx.is_closed(),
             Self::Stickers(tx) => tx.is_closed(),
+            Self::LinkPreview(tx) => tx.is_closed(),
             Self::Acted(tx) => tx.is_closed(),
             Self::Installed { tell, .. } => tell.is_closed(),
             Self::Removed(tx) => tx.is_closed(),
@@ -422,6 +425,9 @@ impl Awaiting {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::Stickers(tx) => {
+                let _ = tx.send(Err(detail.to_string()));
+            }
+            Self::LinkPreview(tx) => {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::Mutation(tx) => {
@@ -1111,6 +1117,7 @@ impl SessionHandle {
         text: &str,
         local_id: String,
         quoted: Option<QuotedMessage>,
+        link_preview: Option<oxidezap_core::LinkPreview>,
     ) {
         self.ask(
             ClientRequest::SendText(Box::new(SendText {
@@ -1118,6 +1125,7 @@ impl SessionHandle {
                 text: text.to_string(),
                 local_id: Some(local_id.clone()),
                 quoted,
+                link_preview,
             })),
             Awaiting::Send {
                 chat_jid: jid.to_string(),
@@ -1795,6 +1803,19 @@ impl SessionHandle {
         self.ask(
             ClientRequest::Stickers(Box::new(request)),
             Awaiting::Stickers(tx),
+        );
+        rx
+    }
+
+    /// Ask the daemon for the card of a link being typed.
+    pub fn link_preview(
+        &self,
+        url: String,
+    ) -> oneshot::Receiver<Result<Option<oxidezap_core::LinkPreview>, String>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::LinkPreview(oxidezap_ipc::LinkPreviewRequest { url }),
+            Awaiting::LinkPreview(tx),
         );
         rx
     }

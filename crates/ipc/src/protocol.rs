@@ -432,6 +432,12 @@ pub enum DaemonMessage {
         id: RequestId,
         result: Result<Box<StickerReply>, String>,
     },
+    /// A link's card, answering [`ClientRequest::LinkPreview`]. `None` when
+    /// the page says nothing worth a card.
+    LinkPreview {
+        id: RequestId,
+        result: Result<Option<Box<oxidezap_core::LinkPreview>>, String>,
+    },
     /// What this account occupies on disk, answering
     /// [`ClientRequest::StorageUsage`].
     Storage {
@@ -719,6 +725,17 @@ pub struct SendText {
     /// wrote it, and the line to show in the quote bar.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quoted: Option<QuotedMessage>,
+    /// The card for the link in the text, as the composer showed it. It goes
+    /// out inside the message, the way a phone sends one, so the other side
+    /// draws it without fetching anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link_preview: Option<oxidezap_core::LinkPreview>,
+}
+
+/// Look up the card for a link being typed. See [`ClientRequest::LinkPreview`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkPreviewRequest {
+    pub url: String,
 }
 
 /// Delete one sent message locally or request deletion for everyone.
@@ -1064,6 +1081,11 @@ pub enum ClientRequest {
     /// Favorite stickers and their hashtags. Answered with
     /// [`DaemonMessage::Stickers`] under the request's id.
     Stickers(Box<StickerRequest>),
+    /// The page behind a link typed into the composer: its title,
+    /// description and picture. Answered with [`DaemonMessage::LinkPreview`]
+    /// under the request's id. The daemon fetches it because the daemon is
+    /// what reaches the network; the window never does.
+    LinkPreview(LinkPreviewRequest),
     /// Fetch media the daemon has not cached yet.
     ///
     /// The one request whose answer is neither a state change nor an
@@ -2076,6 +2098,7 @@ mod tests {
                     text: "oi".into(),
                     local_id: Some("local-1".into()),
                     quoted: Some(quoted.clone()),
+                    link_preview: None,
                 })),
                 r#"{"request":"send_text","jid":"559900000001@s.whatsapp.net","text":"oi","local_id":"local-1","quoted":{"message_id":"3EB0A","sender":"559900000001@s.whatsapp.net","sender_name":"quem quer que seja","preview":"a linha citada","kind":null}}"#.to_string(),
             ),
@@ -2085,8 +2108,30 @@ mod tests {
                     text: "oi".into(),
                     local_id: None,
                     quoted: None,
+                    link_preview: None,
                 })),
                 r#"{"request":"send_text","jid":"559900000001@s.whatsapp.net","text":"oi","local_id":null}"#.to_string(),
+            ),
+            (
+                ClientRequest::SendText(Box::new(SendText {
+                    jid: "559900000001@s.whatsapp.net".into(),
+                    text: "https://example.invalid/a".into(),
+                    local_id: None,
+                    quoted: None,
+                    link_preview: Some(oxidezap_core::LinkPreview {
+                        url: "https://example.invalid/a".into(),
+                        title: "A".into(),
+                        description: String::new(),
+                        thumbnail: Some(std::sync::Arc::new(vec![1, 2, 3])),
+                    }),
+                })),
+                r#"{"request":"send_text","jid":"559900000001@s.whatsapp.net","text":"https://example.invalid/a","local_id":null,"link_preview":{"url":"https://example.invalid/a","title":"A","thumbnail":"AQID"}}"#.to_string(),
+            ),
+            (
+                ClientRequest::LinkPreview(LinkPreviewRequest {
+                    url: "https://example.invalid/a".into(),
+                }),
+                r#"{"request":"link_preview","url":"https://example.invalid/a"}"#.to_string(),
             ),
             (
                 ClientRequest::EditMessage(EditMessage {
@@ -2517,6 +2562,28 @@ mod device_contract_tests {
             Err("no session yet".to_string()),
         ] {
             let response = DaemonMessage::Stickers { id: 9, result };
+            let encoded = serde_json::to_string(&response).unwrap();
+            assert_eq!(
+                serde_json::from_str::<DaemonMessage>(&encoded).unwrap(),
+                response
+            );
+        }
+    }
+
+    /// A card, no card and a failure all come back as they went.
+    #[test]
+    fn a_link_preview_answer_round_trips() {
+        for result in [
+            Ok(Some(Box::new(oxidezap_core::LinkPreview {
+                url: "https://example.invalid/a".into(),
+                title: "Um título".into(),
+                description: "Uma descrição".into(),
+                thumbnail: Some(std::sync::Arc::new(vec![0xFF, 0xD8, 0xFF])),
+            }))),
+            Ok(None),
+            Err("the page did not answer".to_string()),
+        ] {
+            let response = DaemonMessage::LinkPreview { id: 4, result };
             let encoded = serde_json::to_string(&response).unwrap();
             assert_eq!(
                 serde_json::from_str::<DaemonMessage>(&encoded).unwrap(),

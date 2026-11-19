@@ -252,15 +252,31 @@ impl StickerPicker {
 
     fn filter(&mut self, cx: &mut gpui::Context<Self>) {
         let query = self.search.read(cx).text().to_string();
+        let thumbs = &self.thumbs;
         self.matches = self
             .favorites
             .iter()
             .enumerate()
             .filter(|(_, sticker)| sticker.matches(&query))
+            .filter(|(_, sticker)| !matches!(thumbs.get(&sticker.filehash), Some(Thumb::Failed(_))))
             .map(|(ix, _)| ix)
             .collect();
         self.scroll.scroll_to_item(0, gpui::ScrollStrategy::Top);
         cx.notify();
+    }
+
+    /// A favorite whose picture cannot be had, even through a message that
+    /// carried it or the phone: it leaves the grid rather than sit there as a
+    /// warning nobody can act on. It is still a favorite — the phone lists
+    /// it — and a new connection gives it another try.
+    fn fail(&mut self, filehash: String, why: SharedString) {
+        let favorites = &self.favorites;
+        self.matches.retain(|ix| {
+            favorites
+                .get(*ix)
+                .is_none_or(|sticker| sticker.filehash != filehash)
+        });
+        self.thumbs.insert(filehash, Thumb::Failed(why));
     }
 
     /// Ask for a picture the grid is about to draw, unless it is already on
@@ -311,7 +327,12 @@ impl StickerPicker {
                         }
                         Err(_) => Thumb::Failed("the connection to the service ended".into()),
                     };
-                    this.thumbs.insert(hash, thumb);
+                    match thumb {
+                        Thumb::Failed(why) => this.fail(hash, why),
+                        thumb => {
+                            this.thumbs.insert(hash, thumb);
+                        }
+                    }
                     this.pump(cx);
                     cx.notify();
                 });
@@ -341,15 +362,8 @@ impl StickerPicker {
                         this.want(&filehash);
                         this.pump(cx);
                     }
-                    Ok(Err(detail)) => {
-                        this.thumbs.insert(filehash, Thumb::Failed(detail.into()));
-                    }
-                    _ => {
-                        this.thumbs.insert(
-                            filehash,
-                            Thumb::Failed("the repair did not come back".into()),
-                        );
-                    }
+                    Ok(Err(detail)) => this.fail(filehash, detail.into()),
+                    _ => this.fail(filehash, "the repair did not come back".into()),
                 }
                 cx.notify();
             });
@@ -564,12 +578,14 @@ impl Render for StickerPicker {
         // screen makes the popover a fifth wider and taller than five at 2x.
         let cell = metrics.icon_button() * 3.;
         let editing = self.editing.clone();
-        let count = self.favorites.len();
+        // What can be sent: a favorite with no picture to be had is not
+        // shown, so it is not counted either.
         let failed = self
             .thumbs
             .values()
             .filter(|thumb| matches!(thumb, Thumb::Failed(_)))
             .count();
+        let count = self.favorites.len().saturating_sub(failed);
         let searching = !self.search.read(cx).text().to_string().trim().is_empty();
         div()
             .flex()
@@ -614,14 +630,6 @@ impl Render for StickerPicker {
                     ),
             )
             .child(Input::new(&self.search).w_full())
-            .when(failed > 0, |panel| {
-                panel.child(
-                    div()
-                        .text_size(metrics.text_micro())
-                        .text_color(cx.theme().muted_foreground)
-                        .child(format!("{failed} {}", crate::tr!(StickerPicturesFailed))),
-                )
-            })
             .children(self.status.clone().map(|status| {
                 div()
                     .text_size(metrics.text_micro())

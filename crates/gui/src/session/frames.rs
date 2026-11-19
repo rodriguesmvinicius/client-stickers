@@ -170,6 +170,11 @@ impl<'a> Frames<'a> {
                     let _ = tx.send(result.map(|reply| *reply));
                 }
             }
+            DaemonMessage::LinkPreview { id, result } => {
+                if let Some(Awaiting::LinkPreview(tx)) = take_pending(self.pending, id) {
+                    let _ = tx.send(result.map(|preview| preview.map(|preview| *preview)));
+                }
+            }
 
             // The first frame, and the only one that describes where things
             // already stand. A window opened while the daemon was already

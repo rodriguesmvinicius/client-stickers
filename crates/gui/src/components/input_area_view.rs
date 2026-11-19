@@ -27,6 +27,10 @@ use crate::theme::{ActiveProductTheme as _, Metrics};
 pub enum InputAreaEvent {
     /// User wants to send the current message
     SendMessage(String),
+    /// Typing has settled on a link: fetch its card and hand it back through
+    /// [`InputAreaView::link_preview_arrived`]. Asked of the app because the
+    /// app holds the connection to the daemon, which is what fetches it.
+    WantLinkPreview(String),
     /// User picked an attachment category from the composer menu.
     ///
     /// Which conversation is the app's to know, and the files are chosen
@@ -158,6 +162,10 @@ pub struct InputAreaView {
     /// configured and closed, real work, on every render of the composer,
     /// for a value that cannot change while the tab is open.
     can_record: bool,
+    /// The card for the link in the text. See `composer_link`.
+    link: super::composer_link::ComposerLink,
+    /// The card the last send took with it, until the app collects it.
+    outgoing_link: Option<oxidezap_core::LinkPreview>,
 }
 
 impl EventEmitter<InputAreaEvent> for InputAreaView {}
@@ -236,7 +244,95 @@ impl InputAreaView {
             // to send what it encodes: a daemon over the bridge, the tab
             // holding the account, or the page's own session.
             can_record: oxidezap_audio::can_record(),
+            link: Default::default(),
+            outgoing_link: None,
         }
+    }
+
+    /// The text changed: find its link, and when typing rests on a new one,
+    /// ask for its card.
+    fn follow_link(&mut self, cx: &mut Context<Self>) {
+        use super::composer_link::{ComposerLink, SETTLE, first_link};
+        if self.editing {
+            return;
+        }
+        let text = self.input.read(cx).text().to_string();
+        let found = first_link(&text);
+        if found.as_deref() == self.link.link() {
+            return;
+        }
+        self.link = match found {
+            None => ComposerLink::None,
+            Some(link) => {
+                let waiting = link.clone();
+                let timer = cx.spawn(async move |view: WeakEntity<Self>, cx| {
+                    crate::platform::sleep(SETTLE).await;
+                    let _ = view.update(cx, |view, cx| {
+                        if matches!(&view.link, ComposerLink::Settling { link, .. } if *link == waiting)
+                        {
+                            view.link = ComposerLink::Loading {
+                                link: waiting.clone(),
+                            };
+                            cx.emit(InputAreaEvent::WantLinkPreview(waiting));
+                            cx.notify();
+                        }
+                    });
+                });
+                ComposerLink::Settling {
+                    link,
+                    _timer: timer,
+                }
+            }
+        };
+        cx.notify();
+    }
+
+    /// The card for `link` came back. Kept only if that link is still the
+    /// one being waited for: typing may have moved on while the page loaded.
+    pub fn link_preview_arrived(
+        &mut self,
+        link: &str,
+        preview: Option<oxidezap_core::LinkPreview>,
+        cx: &mut Context<Self>,
+    ) {
+        use super::composer_link::ComposerLink;
+        if !matches!(&self.link, ComposerLink::Loading { link: waiting } if waiting == link) {
+            return;
+        }
+        self.link = match preview {
+            Some(mut preview) => {
+                // Matched against the text as written, so a link typed
+                // without its scheme still finds itself when it is sent.
+                preview.url = link.to_string();
+                let image = preview.thumbnail.as_ref().map(|bytes| {
+                    crate::retained_image::RetainedImage::new(gpui::Image::from_bytes(
+                        gpui::ImageFormat::Jpeg,
+                        bytes.as_ref().clone(),
+                    ))
+                });
+                ComposerLink::Ready { preview, image }
+            }
+            None => ComposerLink::Settled {
+                link: link.to_string(),
+            },
+        };
+        cx.notify();
+    }
+
+    /// The person closed the card: the message goes without one.
+    pub(crate) fn drop_link_preview(&mut self, cx: &mut Context<Self>) {
+        use super::composer_link::ComposerLink;
+        if let Some(link) = self.link.link().map(str::to_string) {
+            self.link = ComposerLink::Settled { link };
+            cx.notify();
+        }
+    }
+
+    /// The card the send of `text` took with it, if it was still up.
+    pub fn take_link_preview(&mut self, text: &str) -> Option<oxidezap_core::LinkPreview> {
+        self.outgoing_link
+            .take()
+            .filter(|preview| text.contains(preview.url.as_str()))
     }
 
     /// Handle input events (Enter, Change, etc.)
@@ -254,6 +350,7 @@ impl InputAreaView {
             InputEvent::Change => {
                 // Handle typing indicator - minimal work, no notify
                 self.on_keystroke(cx);
+                self.follow_link(cx);
             }
             _ => {}
         }
@@ -349,6 +446,8 @@ impl InputAreaView {
         cx: &mut Context<Self>,
     ) -> String {
         self.emoji_open = false;
+        // A card belongs to the draft it was found in.
+        self.link = Default::default();
         let old = self.input.read(cx).text().to_string();
         self.input.update(cx, |state, cx| {
             state.set_value(crate::emoji::content(new_text), window, cx);
@@ -366,6 +465,9 @@ impl InputAreaView {
         if text.trim().is_empty() {
             return;
         }
+        // Taken before the field empties, which forgets the link.
+        self.outgoing_link = self.link.card_for(&text);
+        self.link = Default::default();
         self.input.update(cx, |state, cx| {
             state.set_value("", window, cx);
         });
@@ -541,6 +643,11 @@ impl Render for InputAreaView {
                     .clone()
                     .filter(|_| !self.editing)
                     .map(|reply| render_reply_bar(reply, entity.clone(), metrics, cx)),
+            )
+            .children(
+                (!self.editing && !is_recording)
+                    .then(|| super::composer_link::render(&self.link, entity.clone(), metrics, cx))
+                    .flatten(),
             )
             .child(if is_recording {
                 self.render_recording(control, metrics, cx)

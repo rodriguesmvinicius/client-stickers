@@ -354,6 +354,7 @@ impl Commands for Bridge {
                 preview: String::new(),
                 kind: None,
             }),
+            link_preview: None,
         }))
     }
 
