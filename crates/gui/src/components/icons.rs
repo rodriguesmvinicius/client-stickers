@@ -34,6 +34,8 @@ pub enum ProductIcon {
     Film,
     FileText,
     Sticker,
+    /// GIFs from GIPHY, beside the stickers.
+    Gif,
     Trash,
     Volume,
     Shield,
@@ -50,7 +52,7 @@ pub enum ProductIcon {
 
 impl ProductIcon {
     /// Every icon, so a test can prove each one actually loads.
-    pub const ALL: [Self; 31] = [
+    pub const ALL: [Self; 32] = [
         Self::Phone,
         Self::PhoneOff,
         Self::Video,
@@ -71,6 +73,7 @@ impl ProductIcon {
         Self::Film,
         Self::FileText,
         Self::Sticker,
+        Self::Gif,
         Self::Trash,
         Self::Volume,
         Self::Shield,
@@ -107,6 +110,7 @@ impl ProductIcon {
             Self::Film => "icons/film.svg",
             Self::FileText => "icons/file-text.svg",
             Self::Sticker => "icons/sticker.svg",
+            Self::Gif => "icons/gif.svg",
             Self::Trash => "icons/trash.svg",
             Self::Volume => "icons/volume.svg",
             Self::Shield => "icons/shield.svg",

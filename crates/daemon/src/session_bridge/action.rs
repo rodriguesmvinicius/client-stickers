@@ -39,6 +39,13 @@ pub enum Action {
         request: oxidezap_ipc::ForwardMessage,
         answer_to: Outbox,
     },
+    /// A GIF from the picker, fetched from GIPHY and sent as a GIF message.
+    SendGif {
+        id: RequestId,
+        jid: String,
+        gif: Box<oxidezap_ipc::GifItem>,
+        answer_to: Outbox,
+    },
     SendAudio(oxidezap_ipc::SendAudio),
     SendMedia(oxidezap_ipc::SendMedia),
     SendReaction(oxidezap_ipc::SendReaction),

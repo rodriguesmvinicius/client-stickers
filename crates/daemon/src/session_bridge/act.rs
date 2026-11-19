@@ -223,6 +223,41 @@ impl Bridge {
                 });
                 None
             }
+            Action::SendGif {
+                id,
+                jid,
+                gif,
+                answer_to,
+            } => {
+                let connection = self.hub.connection();
+                if !connection.is_connected() {
+                    answer_now(
+                        &answer_to,
+                        gif_answer(id, Err(format!("not connected: {connection:?}"))),
+                    );
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    return None;
+                }
+                let Some(permit) = self.permit() else {
+                    let _ = reply.send(too_busy());
+                    return None;
+                };
+                let (width, height) = (gif.width, gif.height);
+                let task = client.send_gif(jid, width, height, async move {
+                    crate::giphy::fetch_for_send(&gif).await
+                });
+                oxidezap_session::spawn(async move {
+                    let result = task
+                        .await
+                        .map_err(|e| e.to_string())
+                        .and_then(|sent| sent)
+                        .map(|_| oxidezap_ipc::GifReply::Done);
+                    answer_now(&answer_to, gif_answer(id, result));
+                    let _ = reply.send(CommandOutcome::Accepted);
+                    drop(permit);
+                });
+                None
+            }
             Action::MarkStatusWatched(oxidezap_ipc::MarkStatusWatched { message_ids }) => {
                 // The other actions are finished when the session has taken
                 // them and what the network makes of them arrives later; this
@@ -1534,7 +1569,8 @@ impl Bridge {
             Action::Wire { .. }
             | Action::EditMessage { .. }
             | Action::RevokeMessage { .. }
-            | Action::ForwardMessage { .. } => {
+            | Action::ForwardMessage { .. }
+            | Action::SendGif { .. } => {
                 unreachable!("addressed actions are handled in begin_slow")
             }
             Action::SendText(oxidezap_ipc::SendText {
@@ -2322,6 +2358,15 @@ fn finish_download(
             detail: "the session stopped before the download finished".to_string(),
         }),
     }
+}
+
+/// The answer to a GIF send, as the frame the picker is waiting on.
+fn gif_answer(id: RequestId, result: Result<oxidezap_ipc::GifReply, String>) -> String {
+    serde_json::to_string(&DaemonMessage::Gifs {
+        id,
+        result: result.map(Box::new),
+    })
+    .unwrap_or_default()
 }
 
 /// The answer to a download, whichever way it went.

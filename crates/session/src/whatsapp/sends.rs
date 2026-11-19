@@ -292,6 +292,95 @@ impl WhatsAppClient {
             send_sticker_bytes(&live, &chat, data, StickerShape::default()).await
         })
     }
+
+    /// Send a GIF from GIPHY: an MP4 that plays muted and on a loop, credited
+    /// to GIPHY as the official app credits it. `media` fetches the clip and
+    /// its poster; it runs inside the send so the caller holds nothing.
+    pub fn send_gif(
+        &self,
+        to: String,
+        width: u32,
+        height: u32,
+        media: impl Future<Output = Result<(Vec<u8>, Option<Vec<u8>>), String>>
+        + crate::exec::MaybeSend
+        + 'static,
+    ) -> Task<Result<SentReceipt, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let chat: Jid = to.parse().map_err(|_| "not a chat address".to_string())?;
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            let (video, thumbnail) = media.await?;
+            if video.is_empty() {
+                return Err("GIPHY sent an empty clip".to_string());
+            }
+            send_gif_bytes(&live, &chat, video, width, height, thumbnail).await
+        })
+    }
+}
+
+/// Upload a GIF's MP4, record it as this account's outgoing message, and send
+/// it as a GIF rather than a video.
+async fn send_gif_bytes(
+    live: &super::Session,
+    chat: &Jid,
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+    thumbnail: Option<Vec<u8>>,
+) -> Result<SentReceipt, String> {
+    let client = &live.client;
+    let upload = client
+        .upload(
+            data,
+            whatsapp_rust::wacore::download::MediaType::Video,
+            Default::default(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let message = {
+        let mut constructed: wa::Message = Default::default();
+        constructed.video_message = whatsapp_rust::buffa::MessageField::some({
+            let mut constructed: wa::message::VideoMessage = Default::default();
+            constructed.url = Some(upload.url);
+            constructed.direct_path = Some(upload.direct_path);
+            constructed.media_key = Some(upload.media_key.to_vec());
+            constructed.file_sha256 = Some(upload.file_sha256.to_vec());
+            constructed.file_enc_sha256 = Some(upload.file_enc_sha256.to_vec());
+            constructed.file_length = Some(upload.file_length);
+            constructed.mimetype = Some("video/mp4".to_string());
+            constructed.width = (width > 0).then_some(width);
+            constructed.height = (height > 0).then_some(height);
+            constructed.gif_playback = Some(true);
+            constructed.gif_attribution = Some(wa::message::video_message::Attribution::GIPHY);
+            constructed.jpeg_thumbnail = thumbnail;
+            constructed
+        });
+        constructed
+    };
+    let msg_id = client.generate_message_id();
+    super::record_outgoing(
+        &live.chat_store,
+        chat,
+        msg_id.as_str(),
+        &message,
+        &live.resolve_chat_names,
+    )?;
+    let options = whatsapp_rust::SendOptions::default().with_message_id(msg_id.clone());
+    match client
+        .send(whatsapp_rust::SendRequest::new(chat, message).with_options(options))
+        .await
+    {
+        Ok(_) => Ok((
+            msg_id.into_string(),
+            whatsapp_rust::wacore::time::now_millis(),
+        )),
+        Err(e) => {
+            super::mark_send_failed(&live.chat_store, chat, msg_id.as_str());
+            Err(e.to_string())
+        }
+    }
 }
 
 /// Upload a WebP sticker, record it as this account's outgoing message, and

@@ -313,6 +313,8 @@ enum Awaiting {
     Stickers(oneshot::Sender<Result<oxidezap_ipc::StickerReply, String>>),
     /// The card for a link typed into the composer.
     LinkPreview(oneshot::Sender<Result<Option<oxidezap_core::LinkPreview>, String>>),
+    /// A page of GIFs, one's preview, or a GIF sent.
+    Gifs(oneshot::Sender<Result<oxidezap_ipc::GifReply, String>>),
     /// A message drawn before it was sent. On refusal it has to stop being
     /// pending, and the front end is the side that knows which bubble it is.
     Send {
@@ -388,6 +390,7 @@ impl Awaiting {
             Self::CallDevices(tx) => tx.is_closed(),
             Self::Stickers(tx) => tx.is_closed(),
             Self::LinkPreview(tx) => tx.is_closed(),
+            Self::Gifs(tx) => tx.is_closed(),
             Self::Acted(tx) => tx.is_closed(),
             Self::Installed { tell, .. } => tell.is_closed(),
             Self::Removed(tx) => tx.is_closed(),
@@ -428,6 +431,9 @@ impl Awaiting {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::LinkPreview(tx) => {
+                let _ = tx.send(Err(detail.to_string()));
+            }
+            Self::Gifs(tx) => {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::Mutation(tx) => {
@@ -1817,6 +1823,17 @@ impl SessionHandle {
             ClientRequest::LinkPreview(oxidezap_ipc::LinkPreviewRequest { url }),
             Awaiting::LinkPreview(tx),
         );
+        rx
+    }
+
+    /// Ask about GIFs: a page from GIPHY, a preview's bytes, saving the API
+    /// key, or sending one into a chat.
+    pub fn gifs(
+        &self,
+        request: oxidezap_ipc::GifRequest,
+    ) -> oneshot::Receiver<Result<oxidezap_ipc::GifReply, String>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(ClientRequest::Gifs(Box::new(request)), Awaiting::Gifs(tx));
         rx
     }
 

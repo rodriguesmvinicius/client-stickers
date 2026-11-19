@@ -3364,6 +3364,12 @@ impl WhatsAppApp {
             InputAreaEvent::SendSticker(filehash) => {
                 self.send_favorite_sticker(filehash.clone(), cx);
             }
+            InputAreaEvent::OpenGifs => {
+                self.open_gifs(_input_area, cx);
+            }
+            InputAreaEvent::SendGif(gif) => {
+                self.send_gif((**gif).clone(), cx);
+            }
             InputAreaEvent::WantLinkPreview(link) => {
                 self.fetch_link_preview(link.clone(), cx);
             }

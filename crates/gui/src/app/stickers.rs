@@ -22,6 +22,42 @@ impl WhatsAppApp {
         input.update(cx, |view, cx| view.open_stickers(handle, cx));
     }
 
+    /// The GIF popover opened: give it this connection to search with.
+    pub(super) fn open_gifs(&mut self, input: &Entity<InputAreaView>, cx: &mut Context<Self>) {
+        let Some(client) = &self.client else {
+            return;
+        };
+        let handle = (**client).clone();
+        input.update(cx, |view, cx| view.open_gifs(handle, cx));
+    }
+
+    /// Send a GIF from GIPHY into the open chat. The daemon fetches it and
+    /// sends it as a GIF; the bubble arrives the way any sent message does.
+    pub(super) fn send_gif(&mut self, gif: oxidezap_ipc::GifItem, cx: &mut Context<Self>) {
+        let (Some(client), Some(jid)) = (&self.client, self.selected_chat.clone()) else {
+            return;
+        };
+        let answer = client.gifs(oxidezap_ipc::GifRequest::Send {
+            jid,
+            gif: Box::new(gif),
+        });
+        cx.spawn(async move |app: gpui::WeakEntity<Self>, cx| {
+            let failure = match answer.await {
+                Ok(Ok(_)) => return,
+                Ok(Err(detail)) => detail,
+                Err(_) => "the connection to the background service ended".to_string(),
+            };
+            let _ = app.update(cx, |app, cx| {
+                app.notify_user(
+                    format!("{}: {failure}", crate::tr!(GifSendFailed)),
+                    Tone::Problem,
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
     /// Send a favorite into the open chat.
     pub(super) fn send_favorite_sticker(&mut self, filehash: String, cx: &mut Context<Self>) {
         let (Some(client), Some(chat)) = (&self.client, self.selected_chat.clone()) else {

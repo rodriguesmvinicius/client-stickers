@@ -36,6 +36,7 @@ oxidezap-plugin-host = { workspace = true }
 oxidezap-session = { workspace = true }
 oxidezap-wire = { workspace = true }
 portable-atomic = { workspace = true }
+serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 # What both targets have. The rest is per target below: `net` is `mio`, which
 # says outright that it does not build for a page, and `fs`, `signal` and a

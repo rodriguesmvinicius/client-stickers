@@ -17,6 +17,7 @@ use gpui_component::{
 };
 
 use super::emoji_picker::{EmojiPicked, EmojiPicker};
+use super::gif_picker::{GifPicked, GifPicker};
 use super::sticker_picker::{StickerPicked, StickerPicker};
 use crate::components::{ProductIcon, parts};
 use crate::platform::picker::AttachmentCategory;
@@ -56,6 +57,10 @@ pub enum InputAreaEvent {
     OpenStickers,
     /// A favorite sticker was picked, by its hash.
     SendSticker(String),
+    /// The GIF popover opened; the app hands it a session to search with.
+    OpenGifs,
+    /// A GIF was picked from GIPHY.
+    SendGif(Box<oxidezap_ipc::GifItem>),
 }
 
 /// Typing indicator state with debouncing.
@@ -134,6 +139,8 @@ pub struct InputAreaView {
     emoji_open: bool,
     sticker_picker: Entity<StickerPicker>,
     sticker_open: bool,
+    gif_picker: Entity<GifPicker>,
+    gif_open: bool,
     language: crate::i18n::Language,
     /// Whether PTT recording is active
     is_recording: bool,
@@ -221,12 +228,26 @@ impl InputAreaView {
         )
         .detach();
 
+        let gif_picker = cx.new(|cx| GifPicker::new(window, cx));
+        cx.subscribe_in(
+            &gif_picker,
+            window,
+            |this, _, event: &GifPicked, _window, cx| {
+                this.gif_open = false;
+                cx.emit(InputAreaEvent::SendGif(Box::new(event.0.clone())));
+                cx.notify();
+            },
+        )
+        .detach();
+
         Self {
             input,
             emoji_picker,
             emoji_open: false,
             sticker_picker,
             sticker_open: false,
+            gif_picker,
+            gif_open: false,
             language: crate::i18n::Language::current(),
             is_recording: false,
             editing: false,
@@ -486,6 +507,12 @@ impl InputAreaView {
             .update(cx, |picker, cx| picker.opened(session, cx));
     }
 
+    /// The GIF popover opened: search GIPHY through this connection.
+    pub fn open_gifs(&mut self, session: crate::session::SessionHandle, cx: &mut Context<Self>) {
+        self.gif_picker
+            .update(cx, |picker, cx| picker.opened(session, cx));
+    }
+
     fn insert_emoji(&mut self, emoji: &'static str, window: &mut Window, cx: &mut Context<Self>) {
         if self.edit_pending || self.is_recording {
             return;
@@ -674,6 +701,8 @@ impl InputAreaView {
         let picker = self.emoji_picker.clone();
         let sticker_entity = entity.clone();
         let stickers = self.sticker_picker.clone();
+        let gif_entity = entity.clone();
+        let gifs = self.gif_picker.clone();
         // Asked of the rope rather than of a copy of it. `text()` hands back
         // the document itself; `to_string` copied all of it, on every
         // keystroke, to answer whether the send button or the microphone
@@ -757,6 +786,34 @@ impl InputAreaView {
                             .readonly(self.edit_pending)
                             .w_full(),
                     ),
+            )
+            .child(
+                Popover::new("gif-popover")
+                    .anchor(gpui::Anchor::BottomRight)
+                    .open(self.gif_open)
+                    .on_open_change(move |open, _, cx| {
+                        gif_entity.update(cx, |view, cx| {
+                            let open = *open && !view.editing && !view.is_recording;
+                            let opening = open && !view.gif_open;
+                            view.gif_open = open;
+                            if opening {
+                                cx.emit(InputAreaEvent::OpenGifs);
+                            }
+                            cx.notify();
+                        });
+                    })
+                    .track_focus(&self.gif_picker.read(cx).focus_handle(cx))
+                    .trigger(
+                        parts::icon_button(
+                            "gifs",
+                            Icon::new(ProductIcon::Gif),
+                            crate::tr!(Gifs),
+                            control,
+                        )
+                        .disabled(self.editing || self.edit_pending)
+                        .debug_selector(|| "gif-trigger".into()),
+                    )
+                    .content(move |_, _, _| gifs.clone()),
             )
             .child(
                 Popover::new("sticker-popover")

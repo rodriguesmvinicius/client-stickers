@@ -12,6 +12,7 @@ mod composer_link;
 pub(crate) use composer_link::fetchable as fetchable_link;
 mod empty_state;
 mod forward_picker;
+mod gif_picker;
 pub(crate) use forward_picker::{ForwardEvent, ForwardPicker, ForwardTarget};
 mod icons;
 mod input_area_view;

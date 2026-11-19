@@ -305,6 +305,54 @@ pub(super) async fn handle_request(
             });
             Answer::frame(None)
         }
+        // A send needs the session; the rest is GIPHY and the disk, answered
+        // off the connection like a link's card.
+        ClientRequest::Gifs(request) => {
+            let id = match addressed(id, "a GIF request needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            match *request {
+                oxidezap_ipc::GifRequest::Send { jid, gif } => {
+                    out_of_band(
+                        hub,
+                        commands,
+                        id,
+                        Action::SendGif {
+                            id,
+                            jid,
+                            gif,
+                            answer_to: outbox.clone(),
+                        },
+                    )
+                    .await
+                }
+                request => {
+                    let outbox = outbox.clone();
+                    oxidezap_session::spawn(async move {
+                        let result = match request {
+                            oxidezap_ipc::GifRequest::Search { query, offset } => {
+                                crate::giphy::search(query, offset).await
+                            }
+                            oxidezap_ipc::GifRequest::Preview { url } => {
+                                crate::giphy::preview(url).await
+                            }
+                            oxidezap_ipc::GifRequest::SetKey { key } => crate::giphy::set_key(&key),
+                            oxidezap_ipc::GifRequest::Send { .. } => {
+                                unreachable!("a send is routed to the session above")
+                            }
+                        }
+                        .map(Box::new);
+                        if let Ok(frame) =
+                            serde_json::to_string(&DaemonMessage::Gifs { id, result })
+                        {
+                            let _ = outbox.send(frame).await;
+                        }
+                    });
+                    Answer::frame(None)
+                }
+            }
+        }
         ClientRequest::ForgetSession => acted(
             dispatch(
                 hub,

@@ -438,6 +438,11 @@ pub enum DaemonMessage {
         id: RequestId,
         result: Result<Option<Box<oxidezap_core::LinkPreview>>, String>,
     },
+    /// Answers [`ClientRequest::Gifs`].
+    Gifs {
+        id: RequestId,
+        result: Result<Box<GifReply>, String>,
+    },
     /// What this account occupies on disk, answering
     /// [`ClientRequest::StorageUsage`].
     Storage {
@@ -730,6 +735,54 @@ pub struct SendText {
     /// draws it without fetching anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link_preview: Option<oxidezap_core::LinkPreview>,
+}
+
+/// One GIF from GIPHY, as the picker draws it and the send fetches it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GifItem {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+    /// A small animated WebP (or a still) for the grid.
+    pub preview_url: String,
+    /// The MP4 that is sent: WhatsApp's GIFs are silent looping videos.
+    pub mp4_url: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// The GIF picker's requests. See [`ClientRequest::Gifs`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "gifs", rename_all = "snake_case")]
+pub enum GifRequest {
+    /// A page of results: the trending ones for an empty query.
+    Search { query: String, offset: u32 },
+    /// One preview picture, by an address a [`GifItem`] gave.
+    Preview { url: String },
+    /// Send one into a chat as a GIF message.
+    Send { jid: String, gif: Box<GifItem> },
+    /// Keep the GIPHY API key the person pasted. An empty one forgets it.
+    SetKey { key: String },
+}
+
+/// What a [`GifRequest`] comes back with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "reply", rename_all = "snake_case")]
+pub enum GifReply {
+    Page {
+        gifs: Vec<GifItem>,
+        /// Where the next page starts, when there is one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next: Option<u32>,
+    },
+    Preview {
+        #[serde(with = "oxidezap_core::base64")]
+        bytes: Vec<u8>,
+    },
+    /// No GIPHY key is set: GIPHY gives each app its own, free, and this one
+    /// has none to ship.
+    NeedsKey,
+    Done,
 }
 
 /// Look up the card for a link being typed. See [`ClientRequest::LinkPreview`].
@@ -1086,6 +1139,9 @@ pub enum ClientRequest {
     /// under the request's id. The daemon fetches it because the daemon is
     /// what reaches the network; the window never does.
     LinkPreview(LinkPreviewRequest),
+    /// The GIF picker: GIPHY search, previews, the key, and a send. Answered
+    /// with [`DaemonMessage::Gifs`] under the request's id.
+    Gifs(Box<GifRequest>),
     /// Fetch media the daemon has not cached yet.
     ///
     /// The one request whose answer is neither a state change nor an
@@ -2562,6 +2618,60 @@ mod device_contract_tests {
             Err("no session yet".to_string()),
         ] {
             let response = DaemonMessage::Stickers { id: 9, result };
+            let encoded = serde_json::to_string(&response).unwrap();
+            assert_eq!(
+                serde_json::from_str::<DaemonMessage>(&encoded).unwrap(),
+                response
+            );
+        }
+    }
+
+    /// Every GIF request and reply survives the wire, the preview's bytes
+    /// as text.
+    #[test]
+    fn gif_requests_and_replies_round_trip() {
+        let gif = GifItem {
+            id: "abc".into(),
+            title: "Oh happy day".into(),
+            preview_url: "https://media.giphy.com/media/abc/200w_d.webp".into(),
+            mp4_url: "https://media.giphy.com/media/abc/giphy.mp4".into(),
+            width: 480,
+            height: 270,
+        };
+        for request in [
+            GifRequest::Search {
+                query: String::new(),
+                offset: 0,
+            },
+            GifRequest::Preview {
+                url: gif.preview_url.clone(),
+            },
+            GifRequest::Send {
+                jid: "559900000001@s.whatsapp.net".into(),
+                gif: Box::new(gif.clone()),
+            },
+            GifRequest::SetKey { key: "k".into() },
+        ] {
+            let request = ClientRequest::Gifs(Box::new(request));
+            let encoded = serde_json::to_string(&request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<ClientRequest>(&encoded).unwrap(),
+                request
+            );
+        }
+        for result in [
+            Ok(Box::new(GifReply::Page {
+                gifs: vec![gif],
+                next: Some(24),
+            })),
+            Ok(Box::new(GifReply::Preview {
+                bytes: vec![b'R', b'I', b'F', b'F'],
+            })),
+            Ok(Box::new(GifReply::NeedsKey)),
+            Ok(Box::new(GifReply::Done)),
+            Err("GIPHY did not answer".to_string()),
+        ] {
+            let response = DaemonMessage::Gifs { id: 3, result };
             let encoded = serde_json::to_string(&response).unwrap();
             assert_eq!(
                 serde_json::from_str::<DaemonMessage>(&encoded).unwrap(),
