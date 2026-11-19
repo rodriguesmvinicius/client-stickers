@@ -155,6 +155,65 @@ impl Materialization {
 }
 
 impl WhatsAppApp {
+    /// A conversation went off screen: give back the picture bytes its
+    /// messages were hydrated with, and their decodes, keeping the cache
+    /// references that bring them back.
+    ///
+    /// Hydration reads a picture's bytes from the daemon's disk cache when its
+    /// row is drawn, and until now they stayed on the message for as long as
+    /// the conversation was loaded — every photo in every chat opened since
+    /// start-up, encoded, plus the copies the cached timeline held. Only what
+    /// can be read again is let go: media that carries a `cache_key`, on a
+    /// build whose cache defers message media. Coming back costs a disk read
+    /// and a small decode per visible row, which is what opening the
+    /// conversation the first time cost.
+    pub(super) fn release_hydrated_media(&mut self, jid: &str) {
+        if !self
+            .media_cache()
+            .is_some_and(|cache| cache.defers_message_media())
+        {
+            return;
+        }
+        let Some(chat) = self.chats.iter().find(|chat| chat.jid == jid) else {
+            return;
+        };
+        let rereadable = |message: &ChatMessage| {
+            message.media.as_ref().is_some_and(|media| {
+                media.cache_key.is_some()
+                    && !media.data_is_preview
+                    && !media.data.is_empty()
+                    && matches!(
+                        media.media_type,
+                        oxidezap_core::MediaType::Image | oxidezap_core::MediaType::Sticker
+                    )
+            })
+        };
+        let released: Vec<String> = chat
+            .messages
+            .iter()
+            .filter(|message| rereadable(message))
+            .map(|message| message.id.clone())
+            .collect();
+        if released.is_empty() {
+            return;
+        }
+        if let Some(chat) = self.find_chat_mut(jid) {
+            for message in chat.messages.iter_mut().filter(|m| rereadable(m)) {
+                if let Some(media) = message.media.as_mut() {
+                    media.data = std::sync::Arc::new(Vec::new());
+                }
+            }
+        }
+        {
+            let mut decoded = self.decoded_images.borrow_mut();
+            for id in &released {
+                decoded.shift_remove(id);
+            }
+        }
+        // The built timeline holds its own copy of each message.
+        self.message_list_cache.borrow_mut().remove(jid);
+    }
+
     pub fn has_deferred_media_reference(&self, message: &ChatMessage) -> bool {
         Target::reference(message).is_some()
             && self
@@ -521,6 +580,33 @@ mod tests {
             app.chats = vec![Arc::new(chat)];
         });
         (app, cache)
+    }
+
+    /// Leaving a conversation gives back the bytes hydration read for it and
+    /// keeps the reference that reads them again; bytes with no reference,
+    /// and previews, stay.
+    #[gpui::test]
+    fn leaving_a_chat_releases_only_bytes_the_cache_can_give_back(cx: &mut gpui::TestAppContext) {
+        let (app, _cache) = setup(cx);
+        app.update(cx, |app, _| {
+            let chat = Arc::make_mut(&mut app.chats[0]);
+            for (n, message) in chat.messages.iter_mut().enumerate() {
+                let media = message.media.as_mut().unwrap();
+                media.data = Arc::new(vec![7; 16]);
+                media.data_is_preview = n == 2;
+                media.cache_key = (n != 1).then(|| format!("full-{n}"));
+            }
+            app.release_hydrated_media("peer@example.invalid");
+            let messages = &app.chats[0].messages;
+            let data = |n: usize| messages[n].media.as_ref().unwrap().data.len();
+            assert_eq!(data(0), 0, "re-readable bytes go");
+            assert_eq!(data(1), 16, "bytes with no cache reference stay");
+            assert_eq!(data(2), 16, "a preview stays");
+            assert_eq!(
+                messages[0].media.as_ref().unwrap().cache_key.as_deref(),
+                Some("full-0")
+            );
+        });
     }
 
     #[gpui::test]

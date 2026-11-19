@@ -88,7 +88,13 @@ fn main() -> Result<()> {
     oxidezap_logging::install(&["zbus", "tracing"]);
     oxidezap_logging::activate();
 
+    // Two workers, not one per core. This runtime answers windows and runs
+    // the tray and plugins; the WhatsApp session has its own (see
+    // `oxidezap_session::exec`). Each idle worker is a thread with its own
+    // stack and scheduler state, and on a sixteen-thread machine the default
+    // was sixteen of them here and sixteen more there, waiting.
     let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
         .enable_all()
         .build()
         .context("building the daemon runtime")?;

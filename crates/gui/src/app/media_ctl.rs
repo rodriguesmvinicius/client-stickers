@@ -961,6 +961,44 @@ impl WhatsAppApp {
         .detach();
     }
 
+    /// Whether a drawn sticker with no picture yet should be fetched now.
+    pub(crate) fn wants_sticker_fetch(&self, message_id: &str) -> bool {
+        !self.sticker_fetch_attempts.contains(message_id) && !self.is_downloading(message_id)
+    }
+
+    /// Fetch a sticker the list is drawing without its picture.
+    ///
+    /// A sticker is a few kilobytes and is the message; WhatsApp never asks
+    /// to have one tapped. Live ones arrive with their bytes, but one that
+    /// came in a backlog, a history sync or — the one that showed it — this
+    /// device's own send has only its reference, and drew a "tap to
+    /// download" placeholder. Called only for rows the list lays out, a few
+    /// at a time, once per sticker: a failure falls back to the placeholder,
+    /// whose tap still retries.
+    pub(crate) fn auto_fetch_sticker(
+        &mut self,
+        chat_jid: String,
+        message_id: String,
+        downloadable: DownloadableMedia,
+        cx: &mut Context<Self>,
+    ) {
+        /// Stickers fetched at once: a screenful arrives in a moment without
+        /// a backlog of them crowding out a download somebody asked for.
+        const AT_ONCE: usize = 4;
+        if self.client.is_none()
+            || !self.is_connected()
+            || self.downloads_in_flight.len() >= AT_ONCE
+            || !self.wants_sticker_fetch(&message_id)
+        {
+            return;
+        }
+        if self.sticker_fetch_attempts.len() >= 4096 {
+            self.sticker_fetch_attempts.clear();
+        }
+        self.sticker_fetch_attempts.insert(message_id.clone());
+        self.fetch_image(message_id, downloadable, false, Some(chat_jid), cx);
+    }
+
     /// Called only for rows the virtual list lays out. Bound concurrency and
     /// remember failures so repainting cannot create a network retry loop.
     pub(crate) fn improve_channel_preview(

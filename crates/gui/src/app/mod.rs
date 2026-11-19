@@ -473,8 +473,15 @@ pub const CALL_CONTEXT: &str = "Call";
 /// there and still move the caret in the composer everywhere else.
 pub const VIEWER_CONTEXT: &str = "MediaViewer";
 
-/// Maximum number of video players to keep cached (each holds decoded frames)
-const MAX_VIDEO_PLAYERS: usize = 10;
+/// Maximum number of video players to keep cached: each holds the whole file
+/// and its decoded sound. A backstop — idle players are dropped as soon as
+/// nothing needs them; see `release_idle_decoders`.
+const MAX_VIDEO_PLAYERS: usize = 3;
+
+/// Whether an idle player is dropped rather than kept for a replay. The web
+/// build keeps them: there a refetch is a download from the CDN, not a read
+/// from a disk cache next door.
+const EVICT_IDLE_PLAYERS: bool = cfg!(not(target_family = "wasm"));
 
 /// How many bytes of decoded images to keep cached.
 ///
@@ -986,6 +993,10 @@ pub struct WhatsAppApp {
     materialization_cache: Option<Arc<dyn crate::session::MediaCache>>,
     /// Automatic attempts: false while pending/failed, true after success.
     channel_preview_attempts: std::collections::HashMap<(String, String), bool>,
+    /// Stickers already fetched without being asked, so a failure is not
+    /// retried at every repaint; tapping still retries. See
+    /// `media_ctl::auto_fetch_sticker`.
+    sticker_fetch_attempts: HashSet<String>,
     image_downloads_in_flight: std::collections::HashSet<String>,
     /// Native document destinations, scoped to the account, chat and message
     /// that initiated the save. Browser handoffs never enter this map.
@@ -1554,6 +1565,7 @@ impl WhatsAppApp {
             #[cfg(test)]
             materialization_cache: None,
             channel_preview_attempts: std::collections::HashMap::new(),
+            sticker_fetch_attempts: HashSet::new(),
             image_downloads_in_flight: std::collections::HashSet::new(),
             saved_documents: HashMap::new(),
             document_downloads_in_flight: std::collections::HashSet::new(),
@@ -3058,6 +3070,9 @@ impl WhatsAppApp {
         if self.selected_chat.as_deref() != Some(jid.as_str()) && self.reply_to.is_some() {
             self.cancel_reply(cx);
         }
+        if let Some(left) = self.selected_chat.clone().filter(|left| *left != jid) {
+            self.release_hydrated_media(&left);
+        }
         self.selected_chat = Some(jid.clone());
         if let Some(chat) = self.find_chat(&jid).cloned() {
             self.demand_avatar_for_chat(&chat);
@@ -3487,13 +3502,31 @@ impl WhatsAppApp {
     /// asked for and so where the decoder is still needed, but once the
     /// settling polls are done nothing is waiting on it. What cost a download
     /// stays and only the session goes.
+    ///
+    /// And, natively, the player itself, unless something still needs it: a
+    /// player holds the whole video file and its sound decoded to `f32` — a
+    /// two-and-a-half-minute clip is some fifty megabytes — and ten of them
+    /// were kept so a replay would not fetch again. The fetch is from the
+    /// daemon's own disk cache, a moment's work; the memory was not. Kept:
+    /// the one playing, the one whose sound is paused mid-way, the one the
+    /// viewer is showing, and any still downloading or decoding.
     fn release_idle_decoders(&mut self) {
         let playing = self.playing_video_id().map(|s| s.to_string());
-        for (id, player) in &mut self.video_players {
+        let paused_sound = self.audio.message_id().map(str::to_string);
+        let viewed = self.viewer_video.clone();
+        self.video_players.retain(|id, player| {
+            let busy = matches!(
+                player.state(),
+                VideoPlayerState::Downloading | VideoPlayerState::Decoding
+            );
+            let wanted = Some(id) == playing.as_ref()
+                || Some(id) == paused_sound.as_ref()
+                || Some(id) == viewed.as_ref();
             if Some(id) != playing.as_ref() {
                 player.release_decoder();
             }
-        }
+            busy || wanted || !EVICT_IDLE_PLAYERS
+        });
     }
 
     fn start_video_update_task(&mut self, cx: &mut Context<Self>) {

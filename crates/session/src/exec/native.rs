@@ -25,6 +25,20 @@ pub struct Executor {
     worker: Option<std::thread::JoinHandle<()>>,
 }
 
+/// Workers for the session runtime: the cores there are, up to four.
+///
+/// The session's work is bursts — a history sync decrypting and writing, a
+/// reconnection draining its backlog — and four workers carry those, while a
+/// connected session at rest needs one. The runtime's default is a worker
+/// per core, and on a sixteen-thread machine that is a dozen threads that
+/// only ever wait.
+fn session_workers() -> usize {
+    std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(2)
+        .clamp(1, 4)
+}
+
 impl Executor {
     /// Build the runtime.
     ///
@@ -35,6 +49,7 @@ impl Executor {
         Ok(Self {
             runtime: Arc::new(
                 tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(session_workers())
                     .enable_all()
                     .build()?,
             ),

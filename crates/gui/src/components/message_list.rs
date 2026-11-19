@@ -271,6 +271,26 @@ fn render_row(
                     entity.update(cx, |app, cx| app.improve_channel_preview(chat, id, cx))
                 });
             }
+            // A sticker drawn without its picture fetches it: one is a few
+            // kilobytes and is the whole message, so it is never left
+            // waiting for a tap. After any cache read that may bring it.
+            if let Some(media) = msg.media.as_ref()
+                && media.media_type == MediaType::Sticker
+                && (media.data.is_empty() || media.data_is_preview)
+                && !msg.revoked
+                && let Some(downloadable) = media.downloadable.clone()
+                && entity.read(cx).wants_sticker_fetch(message_id)
+                && !entity.read(cx).awaiting_cached_media(chat_jid, msg)
+            {
+                let entity = entity.clone();
+                let chat = chat_jid.to_string();
+                let id = message_id.clone();
+                cx.defer(move |cx| {
+                    entity.update(cx, |app, cx| {
+                        app.auto_fetch_sticker(chat, id, downloadable, cx)
+                    })
+                });
+            }
 
             let app = entity.read(cx);
             // Decoded once and reused: stickers additionally need the stable

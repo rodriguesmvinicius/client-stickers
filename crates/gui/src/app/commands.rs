@@ -188,10 +188,14 @@ impl WhatsAppApp {
                 self.pending_media_request = None;
             }
         }
-        let Some((id, downloadable)) = self.viewer_video_source(cx) else {
+        let next = self.viewer_video_source(cx);
+        self.viewer_video = next.as_ref().map(|(id, _)| id.clone());
+        // The player of the video left behind — its file and decoded sound —
+        // goes, after the one now on screen is marked as wanted.
+        self.release_idle_decoders();
+        let Some((id, downloadable)) = next else {
             return;
         };
-        self.viewer_video = Some(id.clone());
         if self.video_player_state(&id) != Some(crate::video::VideoPlayerState::Playing) {
             self.toggle_video(id, downloadable, cx);
         }
