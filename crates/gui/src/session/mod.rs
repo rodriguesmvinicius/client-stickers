@@ -1124,6 +1124,7 @@ impl SessionHandle {
         local_id: String,
         quoted: Option<QuotedMessage>,
         link_preview: Option<oxidezap_core::LinkPreview>,
+        mentions: Vec<String>,
     ) {
         self.ask(
             ClientRequest::SendText(Box::new(SendText {
@@ -1132,6 +1133,7 @@ impl SessionHandle {
                 local_id: Some(local_id.clone()),
                 quoted,
                 link_preview,
+                mentions,
             })),
             Awaiting::Send {
                 chat_jid: jid.to_string(),

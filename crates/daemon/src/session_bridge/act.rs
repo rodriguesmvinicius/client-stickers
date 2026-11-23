@@ -1579,6 +1579,7 @@ impl Bridge {
                 local_id,
                 quoted,
                 link_preview,
+                mentions,
             }) => {
                 let Some(permit) = self.permit() else {
                     return too_busy();
@@ -1596,6 +1597,7 @@ impl Bridge {
                         local_id.unwrap_or_else(next_local_id),
                         quoted,
                         link_preview,
+                        mentions,
                     )],
                 );
                 CommandOutcome::Accepted
@@ -2752,6 +2754,7 @@ mod tests {
             local_id: None,
             quoted: None,
             link_preview: None,
+            mentions: Vec::new(),
         })
     }
 

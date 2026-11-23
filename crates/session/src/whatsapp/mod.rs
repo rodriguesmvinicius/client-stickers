@@ -2652,6 +2652,7 @@ impl WhatsAppClient {
         local_id: String,
         quoted: Option<oxidezap_core::QuotedMessage>,
         link_preview: Option<oxidezap_core::LinkPreview>,
+        mentions: Vec<String>,
     ) -> Task<()> {
         let session = self.session.clone();
         let ui_sender = self.ui_sender.clone();
@@ -2680,7 +2681,8 @@ impl WhatsAppClient {
                 // A reply, or a link with its card, is the same send as an
                 // extended text message: a bare `conversation` has nowhere to
                 // put the context or the card.
-                let message = text_message(&content, quoted.as_ref(), link_preview.as_ref());
+                let message =
+                    text_message(&content, quoted.as_ref(), link_preview.as_ref(), &mentions);
 
                 // Record BEFORE sending: the server ack event fires during
                 // send_message, so a row recorded after it would stay
@@ -3527,19 +3529,31 @@ pub(crate) fn text_message(
     content: &str,
     quoted: Option<&oxidezap_core::QuotedMessage>,
     link_preview: Option<&oxidezap_core::LinkPreview>,
+    mentions: &[String],
 ) -> wa::Message {
     let mut message: wa::Message = Default::default();
     // A card for a link the text no longer contains would describe a page
     // the message does not mention.
     let link_preview = link_preview.filter(|preview| content.contains(preview.url.as_str()));
-    if quoted.is_none() && link_preview.is_none() {
+    // Only the people the text still names: a mention whose `@` token was
+    // deleted would notify someone the message no longer addresses.
+    let mut mentioned: Vec<String> = Vec::new();
+    for jid in mentions {
+        let user = jid.split('@').next().unwrap_or_default();
+        if !user.is_empty() && content.contains(&format!("@{user}")) && !mentioned.contains(jid) {
+            mentioned.push(jid.clone());
+        }
+    }
+    if quoted.is_none() && link_preview.is_none() && mentioned.is_empty() {
         message.conversation = Some(content.to_string());
         return message;
     }
     let mut text: wa::message::ExtendedTextMessage = Default::default();
     text.text = Some(content.to_string());
-    if let Some(quoted) = quoted {
-        text.context_info = whatsapp_rust::buffa::MessageField::some(quote_context(quoted));
+    if quoted.is_some() || !mentioned.is_empty() {
+        let mut context = quoted.map(quote_context).unwrap_or_default();
+        context.mentioned_jid = mentioned;
+        text.context_info = whatsapp_rust::buffa::MessageField::some(context);
     }
     if let Some(preview) = link_preview {
         text.matched_text = Some(preview.url.clone());

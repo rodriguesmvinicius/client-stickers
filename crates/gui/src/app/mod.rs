@@ -1421,6 +1421,7 @@ impl WhatsAppApp {
                     FromDaemon::Members(roster) => entity.update(cx, |app, cx| {
                         app.rosters_in_flight.remove(&roster.jid);
                         app.group_rosters.insert(roster.jid.clone(), roster);
+                        app.sync_mention_candidates(cx);
                         cx.notify();
                     }),
                     // Released rather than remembered as a failure: the next
@@ -3141,6 +3142,7 @@ impl WhatsAppApp {
         }
 
         self.request_group_members(&jid);
+        self.sync_mention_candidates(cx);
 
         // Scroll to the last message
         self.scroll_to_last_message();
@@ -3162,6 +3164,22 @@ impl WhatsAppApp {
         };
         client.load_group_members(jid.to_string());
         self.rosters_in_flight.insert(jid.to_string());
+    }
+
+    /// Tell the composer who can be `@`-mentioned in the open chat: the
+    /// group's members other than this account, named ones first. Nobody
+    /// outside a group, or before its roster has arrived.
+    fn sync_mention_candidates(&mut self, cx: &mut Context<Self>) {
+        let Some(input) = self.input_area.clone() else {
+            return;
+        };
+        let candidates = self
+            .selected_chat
+            .as_deref()
+            .and_then(|jid| self.group_rosters.get(jid))
+            .map(mention_candidates)
+            .unwrap_or_default();
+        input.update(cx, |view, cx| view.set_mention_candidates(candidates, cx));
     }
 
     /// Who is in `jid`, as far as this window has been told.
@@ -3430,7 +3448,24 @@ impl WhatsAppApp {
             .input_area
             .as_ref()
             .and_then(|input| input.update(cx, |view, _| view.take_link_preview(text)));
-        self.send_quoted(text, quoted, link_preview, cx);
+        // And who it `@`-mentions: the wire spells each as digits, while the
+        // bubble drawn now shows the names the person picked.
+        let mentions = self
+            .input_area
+            .as_ref()
+            .and_then(|input| input.update(cx, |view, _| view.take_mentions(text)));
+        self.send_mentioning(text, quoted, link_preview, mentions, cx);
+    }
+
+    /// Send `text`, quoting whatever the caller says it quotes.
+    fn send_quoted(
+        &mut self,
+        text: &str,
+        quoted: Option<QuotedMessage>,
+        link_preview: Option<oxidezap_core::LinkPreview>,
+        cx: &mut Context<Self>,
+    ) {
+        self.send_mentioning(text, quoted, link_preview, None, cx);
     }
 
     /// Send `text`, quoting whatever the caller says it quotes.
@@ -3439,11 +3474,15 @@ impl WhatsAppApp {
     /// the *original* message's quote: retrying is presented as sending the
     /// failed message again, and the reply draft that produced it was
     /// consumed when it was first sent.
-    fn send_quoted(
+    ///
+    /// `mentions` is the text as the wire carries it and who it mentions,
+    /// when it mentions anyone; `text` is then what the bubble shows.
+    fn send_mentioning(
         &mut self,
         text: &str,
         quoted: Option<QuotedMessage>,
         link_preview: Option<oxidezap_core::LinkPreview>,
+        mentions: Option<(String, Vec<String>)>,
         cx: &mut Context<Self>,
     ) {
         // Check if connected before attempting to send
@@ -3461,12 +3500,17 @@ impl WhatsAppApp {
             warn!("Cannot send message: client is unavailable");
             return;
         };
+        let (wire, mentioned) = match mentions {
+            Some((wire, mentioned)) => (wire, mentioned),
+            None => (text.to_string(), Vec::new()),
+        };
         client.send_message(
             &jid,
-            text,
+            &wire,
             local_id.clone(),
             quoted.clone(),
             link_preview.clone(),
+            mentioned,
         );
 
         // Add to local chat immediately for responsiveness; the client renames
@@ -4832,6 +4876,43 @@ type StickerValidation = (Cached, bool, Arc<Vec<u8>>);
 /// list with nothing to scroll answers "at the top" permanently.
 fn timeline_may_page(visible: Option<&str>, anchored: Option<&str>, chat_jid: &str) -> bool {
     visible == Some(chat_jid) && anchored == Some(chat_jid)
+}
+
+/// The members of `roster` the composer can mention, as its list shows them.
+fn mention_candidates(
+    roster: &oxidezap_core::GroupRoster,
+) -> Vec<crate::components::MentionCandidate> {
+    let mut candidates: Vec<crate::components::MentionCandidate> = roster
+        .members
+        .iter()
+        .filter(|member| !member.is_self)
+        .map(|member| {
+            let number = oxidezap_core::format_phone_jid(&member.jid);
+            let name = member
+                .name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .or_else(|| number.clone())
+                .unwrap_or_else(|| member.jid.split('@').next().unwrap_or_default().to_string());
+            let detail = number.filter(|number| *number != name);
+            crate::components::MentionCandidate {
+                jid: member.jid.clone(),
+                name,
+                detail,
+            }
+        })
+        .collect();
+    // Named people first, alphabetically; numbers after.
+    candidates.sort_by_cached_key(|candidate| {
+        (
+            candidate.detail.is_none()
+                && candidate
+                    .name
+                    .starts_with(|c: char| c == '+' || c.is_ascii_digit()),
+            candidate.name.to_lowercase(),
+        )
+    });
+    candidates
 }
 
 #[cfg(test)]

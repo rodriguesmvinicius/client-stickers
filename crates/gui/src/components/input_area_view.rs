@@ -11,7 +11,9 @@ use gpui::{App, Entity, EventEmitter, Focusable as _, Task, WeakEntity, Window, 
 use gpui_component::{
     ActiveTheme, Disableable as _, Icon, IconName, Sizable as _,
     button::{Button, ButtonVariants},
-    input::{Enter, InputEvent, Paste, Textarea, TextareaState},
+    input::{
+        Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Paste, Textarea, TextareaState,
+    },
     menu::{DropdownMenu as _, PopupMenuItem},
     popover::Popover,
 };
@@ -173,6 +175,13 @@ pub struct InputAreaView {
     link: super::composer_link::ComposerLink,
     /// The card the last send took with it, until the app collects it.
     outgoing_link: Option<oxidezap_core::LinkPreview>,
+    /// Who can be `@`-mentioned in this chat: a group's members, else nobody.
+    mention_candidates: Vec<super::MentionCandidate>,
+    /// The `@` being typed and the members it matches, while the list is up.
+    mention: Option<super::composer_mentions::MentionQuery>,
+    /// What the last send mentioned — the text as read, the text as sent,
+    /// and who — until the app collects it.
+    outgoing_mentions: Option<(String, String, Vec<String>)>,
 }
 
 impl EventEmitter<InputAreaEvent> for InputAreaView {}
@@ -267,7 +276,119 @@ impl InputAreaView {
             can_record: oxidezap_audio::can_record(),
             link: Default::default(),
             outgoing_link: None,
+            mention_candidates: Vec::new(),
+            mention: None,
+            outgoing_mentions: None,
         }
+    }
+
+    /// Who can be mentioned in the open chat. Empty outside a group.
+    pub fn set_mention_candidates(
+        &mut self,
+        candidates: Vec<super::MentionCandidate>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mention_candidates == candidates {
+            return;
+        }
+        self.mention_candidates = candidates;
+        self.follow_mention(cx);
+    }
+
+    /// The text or the cursor moved: open, narrow or close the member list.
+    fn follow_mention(&mut self, cx: &mut Context<Self>) {
+        use super::composer_mentions::{MentionQuery, matching, query_at};
+        let found = (!self.editing && !self.mention_candidates.is_empty())
+            .then(|| {
+                let state = self.input.read(cx);
+                let tokens: Vec<_> = state.tokens().iter().map(|span| span.range()).collect();
+                let text = state.text().to_string();
+                query_at(&text, state.cursor(), &tokens)
+            })
+            .flatten()
+            .and_then(|(at, query)| {
+                let matches = matching(&self.mention_candidates, &query);
+                (!matches.is_empty()).then_some((at, matches))
+            });
+        let next = found.map(|(at, matches)| {
+            // Keep the highlighted row while it still matches.
+            let selected = self
+                .mention
+                .as_ref()
+                .filter(|open| open.at == at)
+                .and_then(|open| open.matches.get(open.selected))
+                .and_then(|kept| matches.iter().position(|m| m.jid == kept.jid))
+                .unwrap_or(0);
+            MentionQuery {
+                at,
+                matches,
+                selected,
+            }
+        });
+        let changed = match (&self.mention, &next) {
+            (None, None) => false,
+            (Some(a), Some(b)) => {
+                a.at != b.at || a.selected != b.selected || a.matches != b.matches
+            }
+            _ => true,
+        };
+        self.mention = next;
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// Move the highlight in the member list.
+    fn step_mention(&mut self, down: bool, cx: &mut Context<Self>) {
+        if let Some(open) = &mut self.mention {
+            let last = open.matches.len().saturating_sub(1);
+            open.selected = if down {
+                if open.selected >= last {
+                    0
+                } else {
+                    open.selected + 1
+                }
+            } else if open.selected == 0 {
+                last
+            } else {
+                open.selected - 1
+            };
+            cx.notify();
+        }
+    }
+
+    /// Replace the `@` being typed with the member at `ix` in the list.
+    pub(super) fn pick_mention(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(open) = self.mention.take() else {
+            return;
+        };
+        let Some(candidate) = open.matches.get(ix).cloned() else {
+            return;
+        };
+        let token = super::composer_mentions::token_for(&candidate);
+        self.input.update(cx, |state, cx| {
+            let cursor = state.cursor();
+            if open.at > cursor {
+                return;
+            }
+            if state
+                .replace_range_with_token(open.at..cursor, token, window, cx)
+                .is_ok()
+            {
+                state.insert(" ", window, cx);
+            }
+            state.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    /// The text of the last send as the wire carries it and who it mentions,
+    /// when that send was `text` and mentioned anyone.
+    pub fn take_mentions(&mut self, text: &str) -> Option<(String, Vec<String>)> {
+        self.outgoing_mentions
+            .take()
+            .filter(|(display, _, jids)| display == text && !jids.is_empty())
+            .map(|(_, wire, jids)| (wire, jids))
     }
 
     /// The text changed: find its link, and when typing rests on a new one,
@@ -372,6 +493,7 @@ impl InputAreaView {
                 // Handle typing indicator - minimal work, no notify
                 self.on_keystroke(cx);
                 self.follow_link(cx);
+                self.follow_mention(cx);
             }
             _ => {}
         }
@@ -469,7 +591,10 @@ impl InputAreaView {
         self.emoji_open = false;
         // A card belongs to the draft it was found in.
         self.link = Default::default();
-        let old = self.input.read(cx).text().to_string();
+        self.mention = None;
+        // Kept as it reads: a draft is plain text, so a mention in it is the
+        // name, not digits nobody recognises.
+        let old = super::composer_mentions::split(&self.input.read(cx).content()).0;
         self.input.update(cx, |state, cx| {
             state.set_value(crate::emoji::content(new_text), window, cx);
         });
@@ -482,13 +607,16 @@ impl InputAreaView {
         if self.edit_pending {
             return;
         }
-        let text = self.input.read(cx).text().to_string();
+        let (text, wire, mentioned) =
+            super::composer_mentions::split(&self.input.read(cx).content());
         if text.trim().is_empty() {
             return;
         }
         // Taken before the field empties, which forgets the link.
         self.outgoing_link = self.link.card_for(&text);
         self.link = Default::default();
+        self.mention = None;
+        self.outgoing_mentions = (!mentioned.is_empty()).then(|| (text.clone(), wire, mentioned));
         self.input.update(cx, |state, cx| {
             state.set_value("", window, cx);
         });
@@ -672,6 +800,14 @@ impl Render for InputAreaView {
                     .map(|reply| render_reply_bar(reply, entity.clone(), metrics, cx)),
             )
             .children(
+                self.mention
+                    .as_ref()
+                    .filter(|_| !self.editing && !is_recording)
+                    .map(|query| {
+                        super::composer_mentions::render(query, entity.clone(), metrics, cx)
+                    }),
+            )
+            .children(
                 (!self.editing && !is_recording)
                     .then(|| super::composer_link::render(&self.link, entity.clone(), metrics, cx))
                     .flatten(),
@@ -716,6 +852,42 @@ impl InputAreaView {
 
         div()
             .key_context("MessageComposer")
+            // While the member list is up, the keys that move through a
+            // list do so here before the field sees them.
+            .capture_action(cx.listener(|view, action: &Enter, window, cx| {
+                if !action.shift
+                    && let Some(open) = &view.mention
+                {
+                    let ix = open.selected;
+                    cx.stop_propagation();
+                    view.pick_mention(ix, window, cx);
+                }
+            }))
+            .capture_action(cx.listener(|view, _: &IndentInline, window, cx| {
+                if let Some(open) = &view.mention {
+                    let ix = open.selected;
+                    cx.stop_propagation();
+                    view.pick_mention(ix, window, cx);
+                }
+            }))
+            .capture_action(cx.listener(|view, _: &MoveUp, _, cx| {
+                if view.mention.is_some() {
+                    cx.stop_propagation();
+                    view.step_mention(false, cx);
+                }
+            }))
+            .capture_action(cx.listener(|view, _: &MoveDown, _, cx| {
+                if view.mention.is_some() {
+                    cx.stop_propagation();
+                    view.step_mention(true, cx);
+                }
+            }))
+            .capture_action(cx.listener(|view, _: &Escape, _, cx| {
+                if view.mention.take().is_some() {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .on_action(|action: &Enter, _, cx| {
                 if !action.shift {
                     // The textarea propagates submission. Consume it here so
@@ -773,6 +945,14 @@ impl InputAreaView {
                     .child(
                         Textarea::new(&self.input)
                             .token(|token, window, cx| {
+                                if super::composer_mentions::is_mention(token.token()) {
+                                    return super::composer_mentions::render_token(
+                                        token.token().label(),
+                                        token.line_height(),
+                                        token.is_selected(),
+                                        cx,
+                                    );
+                                }
                                 crate::emoji::picture(
                                     token.token().text(),
                                     token.line_height(),
@@ -782,6 +962,7 @@ impl InputAreaView {
                                 .when(token.is_selected(), |element| {
                                     element.bg(cx.theme().selection)
                                 })
+                                .into_any_element()
                             })
                             .readonly(self.edit_pending)
                             .w_full(),

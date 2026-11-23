@@ -2831,7 +2831,14 @@ async fn a_send_before_the_session_is_up_still_fails_its_bubble() {
     let mut events = client.take_events().expect("the event stream");
 
     client
-        .send_message(TEST_PEER, "oi", "local-1".to_string(), None, None)
+        .send_message(
+            TEST_PEER,
+            "oi",
+            "local-1".to_string(),
+            None,
+            None,
+            Vec::new(),
+        )
         .await
         .expect("the send task runs");
 
@@ -3982,7 +3989,12 @@ fn a_link_card_rides_in_an_extended_text_only_while_its_link_is_in_it() {
         thumbnail: Some(Arc::new(jpeg.clone())),
     };
 
-    let sent = super::text_message("olha https://example.invalid/v/1", None, Some(&preview));
+    let sent = super::text_message(
+        "olha https://example.invalid/v/1",
+        None,
+        Some(&preview),
+        &[],
+    );
     let text = sent.extended_text_message.as_option().expect("extended");
     assert_eq!(
         text.matched_text.as_deref(),
@@ -3997,10 +4009,38 @@ fn a_link_card_rides_in_an_extended_text_only_while_its_link_is_in_it() {
     );
     assert!(sent.conversation.is_none());
 
-    let edited = super::text_message("nada aqui", None, Some(&preview));
+    let edited = super::text_message("nada aqui", None, Some(&preview), &[]);
     assert_eq!(edited.conversation.as_deref(), Some("nada aqui"));
     assert!(edited.extended_text_message.as_option().is_none());
 
-    let plain = super::text_message("oi", None, None);
+    let plain = super::text_message("oi", None, None, &[]);
     assert_eq!(plain.conversation.as_deref(), Some("oi"));
+}
+
+/// A mention goes out the way a phone sends one: the text keeps `@` plus the
+/// user part, and the full address rides in the context beside it. Someone
+/// whose token was deleted before sending is not notified.
+#[test]
+fn a_text_with_mentions_carries_their_addresses() {
+    let mentions = vec![
+        "559900000002@s.whatsapp.net".to_string(),
+        "123456789@lid".to_string(),
+        "559900000003@s.whatsapp.net".to_string(),
+        "559900000002@s.whatsapp.net".to_string(),
+    ];
+    let sent = super::text_message("oi @559900000002 e @123456789", None, None, &mentions);
+    assert!(sent.conversation.is_none());
+    let text = sent.extended_text_message.as_option().expect("extended");
+    assert_eq!(text.text.as_deref(), Some("oi @559900000002 e @123456789"));
+    let context = text.context_info.as_option().expect("context");
+    assert_eq!(
+        context.mentioned_jid,
+        vec![
+            "559900000002@s.whatsapp.net".to_string(),
+            "123456789@lid".to_string()
+        ]
+    );
+
+    let gone = super::text_message("ninguém aqui", None, None, &mentions);
+    assert_eq!(gone.conversation.as_deref(), Some("ninguém aqui"));
 }

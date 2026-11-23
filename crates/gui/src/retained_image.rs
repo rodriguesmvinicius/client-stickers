@@ -672,6 +672,7 @@ mod tests {
                 let source = Source {
                     image: owner.0.image.clone(),
                     sticker: false,
+                    fit: Fit::Full,
                 };
                 let drawn = if legacy {
                     let source = source.clone();

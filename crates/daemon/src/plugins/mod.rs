@@ -355,6 +355,7 @@ impl Commands for Bridge {
                 kind: None,
             }),
             link_preview: None,
+            mentions: Vec::new(),
         }))
     }
 

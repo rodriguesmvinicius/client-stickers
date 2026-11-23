@@ -735,6 +735,11 @@ pub struct SendText {
     /// draws it without fetching anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link_preview: Option<oxidezap_core::LinkPreview>,
+    /// The people the text `@`-mentions, as full JIDs. The text carries each
+    /// as `@` plus the address's user part, which is how the wire spells a
+    /// mention and how the other side knows to draw a name there.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<String>,
 }
 
 /// One GIF from GIPHY, as the picker draws it and the send fetches it.
@@ -2155,6 +2160,7 @@ mod tests {
                     local_id: Some("local-1".into()),
                     quoted: Some(quoted.clone()),
                     link_preview: None,
+                    mentions: Vec::new(),
                 })),
                 r#"{"request":"send_text","jid":"559900000001@s.whatsapp.net","text":"oi","local_id":"local-1","quoted":{"message_id":"3EB0A","sender":"559900000001@s.whatsapp.net","sender_name":"quem quer que seja","preview":"a linha citada","kind":null}}"#.to_string(),
             ),
@@ -2165,6 +2171,7 @@ mod tests {
                     local_id: None,
                     quoted: None,
                     link_preview: None,
+                    mentions: Vec::new(),
                 })),
                 r#"{"request":"send_text","jid":"559900000001@s.whatsapp.net","text":"oi","local_id":null}"#.to_string(),
             ),
@@ -2180,8 +2187,20 @@ mod tests {
                         description: String::new(),
                         thumbnail: Some(std::sync::Arc::new(vec![1, 2, 3])),
                     }),
+                    mentions: Vec::new(),
                 })),
                 r#"{"request":"send_text","jid":"559900000001@s.whatsapp.net","text":"https://example.invalid/a","local_id":null,"link_preview":{"url":"https://example.invalid/a","title":"A","thumbnail":"AQID"}}"#.to_string(),
+            ),
+            (
+                ClientRequest::SendText(Box::new(SendText {
+                    jid: "120363000000000001@g.us".into(),
+                    text: "oi @559900000002".into(),
+                    local_id: None,
+                    quoted: None,
+                    link_preview: None,
+                    mentions: vec!["559900000002@s.whatsapp.net".into()],
+                })),
+                r#"{"request":"send_text","jid":"120363000000000001@g.us","text":"oi @559900000002","local_id":null,"mentions":["559900000002@s.whatsapp.net"]}"#.to_string(),
             ),
             (
                 ClientRequest::LinkPreview(LinkPreviewRequest {

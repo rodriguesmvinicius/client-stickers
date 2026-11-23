@@ -294,7 +294,8 @@ use std::path::PathBuf;
 /// 44 adds `ClientRequest::ForwardMessage`, answered under its id.
 /// 45 adds `ClientRequest::LinkPreview` and the card a `SendText` carries.
 /// 46 adds `ClientRequest::Gifs`, the GIPHY picker.
-pub const PROTOCOL_VERSION: u32 = 46;
+/// 47 adds the people a `SendText` `@`-mentions.
+pub const PROTOCOL_VERSION: u32 = 47;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///
