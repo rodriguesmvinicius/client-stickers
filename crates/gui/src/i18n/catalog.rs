@@ -32,6 +32,9 @@ catalog! {
     Previous => ("Previous", "Anterior");
     Next => ("Next", "Próximo");
     SaveToDownloads => ("Save to Downloads", "Salvar em Downloads");
+    CopyImage => ("Copy image", "Copiar imagem");
+    ImageCopied => ("Image copied", "Imagem copiada");
+    ImageCopyFailed => ("Could not copy the image", "Não foi possível copiar a imagem");
     NothingToSaveThisFileCouldNotBeRead => ("Nothing to save: this file could not be read", "Nada para salvar: não foi possível ler este arquivo");
     Close => ("Close", "Fechar");
     LoadingImage => ("Loading image...", "Carregando imagem...");

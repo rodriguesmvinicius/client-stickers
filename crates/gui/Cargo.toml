@@ -103,7 +103,14 @@ openh264 = "0.9.9" # H.264 software decoder
 # nothing else: process creation flags are std, and the value itself belongs
 # to the OS rather than to a literal in the call.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_System_Threading"] }
+# Threading for the process; DataExchange and Memory to put a copied picture
+# on the clipboard as a bitmap too (see platform/copy_image.rs).
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Threading",
+] }
 
 # Native notification authorization and the process-level active state. GPUI
 # already uses this objc2 family internally; declared because this crate calls

@@ -14,6 +14,7 @@ use gpui::{
 };
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_component::spinner::Spinner;
 use gpui_component::{Disableable as _, FocusTrapElement as _, Icon, IconName, Sizable as _};
 
@@ -71,8 +72,16 @@ pub fn render_media_viewer(
     let close_entity = entity.clone();
     let video_entity = entity.clone();
     let controls_entity = entity.clone();
+    let copy_entity = entity.clone();
     let save_entity = entity;
     let message_id = props.message.id.clone();
+    let copy_id = message_id.clone();
+    // A picture whose own bytes are here: a video, or one still waiting for
+    // its file, has nothing to copy.
+    let can_copy = props.video.is_none()
+        && props.message.media.as_ref().is_some_and(|media| {
+            media.media_type == MediaType::Image && !media.data.is_empty() && !media.data_is_preview
+        });
     let video = props.video;
     let can_step = viewer.can_step();
     let position: Option<SharedString> = viewer.position().map(Into::into);
@@ -186,32 +195,37 @@ pub fn render_media_viewer(
                             // this they bubble to the scrim and dismiss the
                             // viewer, so a mis-aimed drag on the photo closes
                             // the thing being looked at.
-                            div()
-                                .id("viewer-frame")
-                                .flex()
-                                .max_w_full()
-                                .max_h_full()
-                                .on_click(|_, _window, cx| cx.stop_propagation())
-                                .child(match video {
-                                    Some(video) => render_video_stage(
-                                        props.image,
-                                        props.frame,
-                                        video,
-                                        video_entity,
-                                        metrics,
-                                        cx,
-                                    )
-                                    .into_any_element(),
-                                    None => render_frame(
-                                        props.image,
-                                        props.frame,
-                                        is_video,
-                                        props.is_loading,
-                                        metrics,
-                                        cx,
-                                    )
-                                    .into_any_element(),
-                                }),
+                            with_copy_menu(
+                                div()
+                                    .id("viewer-frame")
+                                    .flex()
+                                    .max_w_full()
+                                    .max_h_full()
+                                    .on_click(|_, _window, cx| cx.stop_propagation())
+                                    .child(match video {
+                                        Some(video) => render_video_stage(
+                                            props.image,
+                                            props.frame,
+                                            video,
+                                            video_entity,
+                                            metrics,
+                                            cx,
+                                        )
+                                        .into_any_element(),
+                                        None => render_frame(
+                                            props.image,
+                                            props.frame,
+                                            is_video,
+                                            props.is_loading,
+                                            metrics,
+                                            cx,
+                                        )
+                                        .into_any_element(),
+                                    }),
+                                can_copy,
+                                copy_entity,
+                                copy_id,
+                            ),
                         ),
                 )
                 .child(step_button(
@@ -333,6 +347,30 @@ fn render_bar(
                     });
                 }),
         )
+}
+
+/// The picture frame, with "Copy image" on right-click when there is a
+/// picture file to copy.
+fn with_copy_menu(
+    frame: gpui::Stateful<gpui::Div>,
+    can_copy: bool,
+    entity: Entity<WhatsAppApp>,
+    message_id: String,
+) -> gpui::AnyElement {
+    if !can_copy {
+        return frame.into_any_element();
+    }
+    frame
+        .context_menu(move |menu, _window, _cx| {
+            let entity = entity.clone();
+            let id = message_id.clone();
+            menu.item(
+                PopupMenuItem::new(crate::tr!(CopyImage)).on_click(move |_, _window, cx| {
+                    entity.update(cx, |app, cx| app.copy_media_image(&id, cx));
+                }),
+            )
+        })
+        .into_any_element()
 }
 
 /// The picture itself, contained so nothing is cropped.

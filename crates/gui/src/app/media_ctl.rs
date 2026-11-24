@@ -1312,6 +1312,49 @@ impl WhatsAppApp {
         .detach();
     }
 
+    /// Put the picture `message_id` carries on the system clipboard, for
+    /// "Copy image" in the viewer. The file is decoded and turned into a PNG
+    /// off the UI thread; only the hand-over happens here.
+    pub fn copy_media_image(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let Some(media) = self
+            .selected_chat_data()
+            .and_then(|chat| {
+                chat.messages
+                    .iter()
+                    .find(|message| message.id == message_id)
+                    .cloned()
+            })
+            .and_then(|message| message.media)
+            .filter(|media| !media.data.is_empty())
+        else {
+            warn!("nothing to copy for {message_id}");
+            return;
+        };
+        let data = Arc::clone(&media.data);
+        let id = message_id.to_string();
+        let prepared = cx
+            .background_executor()
+            .spawn(async move { crate::platform::copy_image::prepare(&data) });
+        cx.spawn(async move |entity: WeakEntity<Self>, cx| {
+            let outcome = match prepared.await {
+                Ok(picture) => cx.update(|cx| crate::platform::copy_image::write(picture, cx)),
+                Err(e) => Err(e),
+            };
+            let _ = entity.update(cx, |app, cx| match outcome {
+                Ok(()) => app.notify_user(crate::tr!(ImageCopied), super::notices::Tone::Info, cx),
+                Err(e) => {
+                    warn!("Failed to copy {id}: {e}");
+                    app.notify_user(
+                        crate::tr!(ImageCopyFailed),
+                        super::notices::Tone::Problem,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Get the video player state for a message (if any)
     pub fn video_player_state(&self, message_id: &str) -> Option<VideoPlayerState> {
         self.video_players.get(message_id).map(|p| p.state())

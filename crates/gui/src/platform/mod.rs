@@ -32,6 +32,7 @@ mod capabilities;
 pub(crate) mod channel_preview;
 pub mod clipboard;
 pub mod clock;
+pub mod copy_image;
 pub mod download;
 pub mod drop;
 pub mod fonts;
