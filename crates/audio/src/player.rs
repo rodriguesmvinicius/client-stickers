@@ -1,6 +1,11 @@
 //! Audio playback using cpal
 //!
-//! Plays Opus/OGG audio files for PTT voice message playback.
+//! Plays voice notes and audio files.
+//!
+//! A voice note is Opus in OGG and goes through libopus. An audio *file* —
+//! an MP3, an M4A from an iPhone, a WAV, AAC from a business account —
+//! is whatever the sender had, so anything that is not Opus is handed to
+//! symphonia, which reads the common containers and codecs in plain Rust.
 
 /// Playing a clip through a sound card, having decoded it here.
 ///
@@ -230,16 +235,19 @@ mod cpal_output {
             if ogg_data.is_empty() {
                 return Err(PlayerError::EmptyAudio);
             }
-            let samples = decode_ogg(&ogg_data)?;
+            let (samples, rate) = decode_any(&ogg_data)?;
             if samples.is_empty() {
                 return Err(PlayerError::EmptyAudio);
             }
 
-            info!("Decoded {} samples for playback", samples.len());
+            info!(
+                "Decoded {} samples at {rate} Hz for playback",
+                samples.len()
+            );
             let (config, sample_format) = output_config()?;
             Ok(prepare_samples(
                 &samples,
-                48000,
+                rate,
                 speed,
                 config,
                 sample_format,
@@ -521,10 +529,21 @@ mod cpal_output {
         let mut channel_count = 1usize;
         let mut pre_skip = 0usize;
 
-        while let Some(packet) = packet_reader
-            .read_packet()
-            .map_err(|e| PlayerError::DecodeError(format!("OGG read error: {}", e)))?
-        {
+        loop {
+            let packet = match packet_reader.read_packet() {
+                Ok(Some(packet)) => packet,
+                Ok(None) => break,
+                // A stream cut short or with a damaged page after the sound
+                // began still plays up to the damage, as on a phone.
+                Err(e) if !all_samples.is_empty() => {
+                    warn!(
+                        "OGG read error after {} samples, playing what was read: {e}",
+                        all_samples.len()
+                    );
+                    break;
+                }
+                Err(e) => return Err(PlayerError::DecodeError(format!("OGG read error: {e}"))),
+            };
             packet_count += 1;
 
             // Header packets are identified by signature, not by ordinal
@@ -599,6 +618,115 @@ mod cpal_output {
         }
 
         Ok(all_samples)
+    }
+
+    /// The longest file decoded, in seconds: a voice note is minutes, and a
+    /// long podcast sent as audio is kept to something the memory will hold
+    /// rather than refused.
+    const MAX_SECONDS: usize = 30 * 60;
+
+    /// Mono samples and their rate, whatever the file is. Opus in OGG goes
+    /// through libopus at 48 kHz; anything else, or an OGG libopus cannot
+    /// read (Vorbis), through symphonia.
+    pub(super) fn decode_any(data: &[u8]) -> Result<(Vec<f32>, u32), PlayerError> {
+        if data.starts_with(b"OggS") {
+            match decode_ogg(data) {
+                Ok(samples) => return Ok((samples, 48_000)),
+                Err(opus) => {
+                    return decode_other(data).map_err(|other| {
+                        warn!("not Opus ({opus}) and not otherwise readable ({other})");
+                        opus
+                    });
+                }
+            }
+        }
+        decode_other(data)
+    }
+
+    /// Decode a file in any container and codec symphonia was built with,
+    /// downmixed to mono as each frame comes.
+    fn decode_other(data: &[u8]) -> Result<(Vec<f32>, u32), PlayerError> {
+        use symphonia::core::codecs::CodecParameters;
+        use symphonia::core::codecs::audio::AudioDecoderOptions;
+        use symphonia::core::formats::FormatOptions;
+        use symphonia::core::formats::probe::Hint;
+        use symphonia::core::io::MediaSourceStream;
+        use symphonia::core::meta::MetadataOptions;
+
+        let failed = |what: &str, e: &dyn std::fmt::Display| {
+            PlayerError::DecodeError(format!("{what}: {e}"))
+        };
+        let source =
+            MediaSourceStream::new(Box::new(Cursor::new(data.to_vec())), Default::default());
+        let mut format = symphonia::default::get_probe()
+            .probe(
+                &Hint::new(),
+                source,
+                FormatOptions::default(),
+                MetadataOptions::default(),
+            )
+            .map_err(|e| failed("unrecognised audio format", &e))?;
+        let (track_id, params) = format
+            .tracks()
+            .iter()
+            .find_map(|track| match &track.codec_params {
+                Some(CodecParameters::Audio(params)) => Some((track.id, params.clone())),
+                _ => None,
+            })
+            .ok_or_else(|| PlayerError::DecodeError("the file has no audio track".to_string()))?;
+        let mut decoder = symphonia::default::get_codecs()
+            .make_audio_decoder(&params, &AudioDecoderOptions::default())
+            .map_err(|e| failed("unsupported audio codec", &e))?;
+
+        let mut rate = params.sample_rate.unwrap_or(0);
+        let mut mono: Vec<f32> = Vec::new();
+        let mut frame: Vec<f32> = Vec::new();
+        loop {
+            let packet = match format.next_packet() {
+                Ok(Some(packet)) => packet,
+                Ok(None) => break,
+                Err(e) if !mono.is_empty() => {
+                    warn!(
+                        "audio read error after {} samples, playing what was read: {e}",
+                        mono.len()
+                    );
+                    break;
+                }
+                Err(e) => return Err(failed("audio read error", &e)),
+            };
+            if packet.track_id != track_id {
+                continue;
+            }
+            match decoder.decode(&packet) {
+                Ok(decoded) => {
+                    let spec = decoded.spec();
+                    if rate == 0 {
+                        rate = spec.rate();
+                    }
+                    let channels = decoded.num_planes().max(1);
+                    decoded.copy_to_vec_interleaved(&mut frame);
+                    if rate > 0 && mono.len() + frame.len() / channels > MAX_SECONDS * rate as usize
+                    {
+                        warn!("audio longer than {MAX_SECONDS}s; playing the start of it");
+                        break;
+                    }
+                    if channels > 1 {
+                        mono.extend(
+                            frame
+                                .chunks(channels)
+                                .map(|chunk| chunk.iter().sum::<f32>() / chunk.len() as f32),
+                        );
+                    } else {
+                        mono.extend_from_slice(&frame);
+                    }
+                }
+                Err(e) => warn!("audio decode error (skipping a frame): {e}"),
+            }
+        }
+        if mono.is_empty() || rate == 0 {
+            return Err(PlayerError::DecodeError("No samples decoded".to_string()));
+        }
+        Ok((mono, rate))
     }
 
     fn resample_audio(samples: &[f32], src_rate: u32, dst_rate: u32, channels: usize) -> Vec<f32> {
@@ -720,6 +848,78 @@ mod cpal_output {
             // Nothing has been prepared, so nothing has been re-timed.
             assert_eq!(player.total_secs(), 0.0);
             assert_eq!(player.elapsed_secs(), 0.0);
+        }
+
+        /// A 16-bit PCM WAV of `samples`, as a phone's recorder writes one.
+        fn wav(rate: u32, channels: u16, samples: &[i16]) -> Vec<u8> {
+            let data_len = (samples.len() * 2) as u32;
+            let mut out = Vec::new();
+            out.extend_from_slice(b"RIFF");
+            out.extend_from_slice(&(36 + data_len).to_le_bytes());
+            out.extend_from_slice(b"WAVEfmt ");
+            out.extend_from_slice(&16u32.to_le_bytes());
+            out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+            out.extend_from_slice(&channels.to_le_bytes());
+            out.extend_from_slice(&rate.to_le_bytes());
+            out.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+            out.extend_from_slice(&(channels * 2).to_le_bytes());
+            out.extend_from_slice(&16u16.to_le_bytes());
+            out.extend_from_slice(b"data");
+            out.extend_from_slice(&data_len.to_le_bytes());
+            for sample in samples {
+                out.extend_from_slice(&sample.to_le_bytes());
+            }
+            out
+        }
+
+        /// An audio file that is not a voice note — here a WAV — is decoded
+        /// at its own rate, which is what failed as "OGG read error" before.
+        #[test]
+        fn an_audio_file_that_is_not_ogg_decodes() {
+            let tone: Vec<i16> = (0..8000)
+                .map(|i| ((i as f32 * 0.2).sin() * 8000.0) as i16)
+                .collect();
+            let (samples, rate) = decode_any(&wav(8000, 1, &tone)).expect("WAV decodes");
+            assert_eq!(rate, 8000);
+            assert_eq!(samples.len(), 8000);
+            assert!(samples.iter().any(|s| s.abs() > 0.1));
+        }
+
+        #[test]
+        fn a_stereo_file_is_mixed_down_to_one_channel() {
+            // Left and right opposite: the mix is silence, one sample a frame.
+            let frames: Vec<i16> = (0..4000).flat_map(|_| [10_000i16, -10_000]).collect();
+            let (samples, rate) = decode_any(&wav(22_050, 2, &frames)).expect("decodes");
+            assert_eq!(rate, 22_050);
+            assert_eq!(samples.len(), 4000);
+            assert!(samples.iter().all(|s| s.abs() < 1e-3));
+        }
+
+        /// A voice note cut short after its sound began plays what arrived,
+        /// instead of failing outright.
+        #[test]
+        fn a_truncated_voice_note_plays_what_arrived() {
+            let note = crate::recorder::RecordedAudio {
+                // Long enough to span several OGG pages, as any real note
+                // does: a page holds at most 255 packets of 20 ms.
+                samples: (0..16_000 * 20)
+                    .map(|i| (i as f32 * 0.05).sin() * 0.3)
+                    .collect(),
+                sample_rate: 16_000,
+                duration_secs: 20,
+            }
+            .prepare();
+            let whole = crate::encoder::encode_to_opus_ogg(&note).expect("encodes");
+            let (full, rate) = decode_any(&whole).expect("whole note decodes");
+            assert_eq!(rate, 48_000);
+            let cut = &whole[..whole.len() * 2 / 3];
+            let (partial, _) = decode_any(cut).expect("a cut note still decodes");
+            assert!(!partial.is_empty() && partial.len() < full.len());
+        }
+
+        #[test]
+        fn bytes_that_are_no_audio_at_all_are_refused() {
+            assert!(decode_any(b"definitely not audio").is_err());
         }
 
         #[test]

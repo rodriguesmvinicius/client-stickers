@@ -40,6 +40,20 @@ cpal = "0.18.2"
 # Kept on the same major as the library's voip-libopus dependency: two
 # semver-incompatible wrappers would each link their own copy of libopus.
 opus = "0.4.0"
+# Audio files that are not voice notes: MP3, M4A/AAC, WAV, FLAC and OGG
+# Vorbis, in plain Rust. A page needs none of it — the browser decodes them.
+# The same major the front end's video track uses, so one copy is linked.
+symphonia = { version = "0.6.1", default-features = false, features = [
+  "aac",
+  "adpcm",
+  "flac",
+  "isomp4",
+  "mp3",
+  "ogg",
+  "pcm",
+  "vorbis",
+  "wav",
+] }
 ringbuf = "0.5.3"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 
