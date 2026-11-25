@@ -34,6 +34,7 @@ mod recovery;
 mod search;
 mod settings;
 mod status;
+mod sticker_making;
 mod stickers;
 mod timeline_ctl;
 mod viewer;
@@ -1123,6 +1124,8 @@ pub struct WhatsAppApp {
     last_status_avatar_fingerprint: Option<u64>,
     /// The forward dialog, while it is up. See `app/forward.rs`.
     forward: Option<forward::Forwarding>,
+    /// The sticker maker, while it is open.
+    sticker_maker: Option<sticker_making::StickerMaking>,
     /// The video the media viewer started, so leaving it can stop it.
     viewer_video: Option<String>,
 }
@@ -1620,6 +1623,7 @@ impl WhatsAppApp {
             status_avatars: HashMap::new(),
             last_status_avatar_fingerprint: None,
             forward: None,
+            sticker_maker: None,
             viewer_video: None,
         }
     }
@@ -3382,6 +3386,9 @@ impl WhatsAppApp {
             InputAreaEvent::SendSticker(filehash) => {
                 self.send_favorite_sticker(filehash.clone(), cx);
             }
+            InputAreaEvent::CreateSticker => {
+                self.open_sticker_maker(window, cx);
+            }
             InputAreaEvent::OpenGifs => {
                 self.open_gifs(_input_area, cx);
             }
@@ -4722,7 +4729,11 @@ impl Render for WhatsAppApp {
         let paste_preview_open = paste_preview.is_some();
         let message_delete_open = message_delete.is_some();
         let forward_overlay = self.forward.as_ref().map(|forward| forward.picker.clone());
-        let forward_open = forward_overlay.is_some();
+        let sticker_overlay = self
+            .sticker_maker
+            .as_ref()
+            .map(|making| making.view.clone());
+        let forward_open = forward_overlay.is_some() || sticker_overlay.is_some();
         let media_viewer_open = self.viewer.read(cx).showing().is_some();
         let modal_open =
             paste_preview_open || message_delete_open || media_viewer_open || forward_open;
@@ -4771,6 +4782,7 @@ impl Render for WhatsAppApp {
         .children(paste_preview)
         .children(message_delete)
         .children(forward_overlay)
+        .children(sticker_overlay)
         .children(call_overlay)
         .child(self.notices().clone())
         // Cached views report their surfaces in prepaint. Move focus after

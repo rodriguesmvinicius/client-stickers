@@ -50,7 +50,10 @@ pub mod startup;
 pub mod window_identity;
 
 pub use activity::application_is_active;
-pub use capabilities::{calls_belong_to_another_tab, calls_unavailable, video_decode_unavailable};
+pub use capabilities::{
+    calls_belong_to_another_tab, calls_unavailable, sticker_maker_unavailable,
+    video_decode_unavailable,
+};
 pub use clock::{sleep, with_timeout};
 pub use fonts::{fonts, with_downloaded_fonts};
 pub use identity::front_end_id;

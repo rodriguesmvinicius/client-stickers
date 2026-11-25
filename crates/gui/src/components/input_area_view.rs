@@ -20,7 +20,7 @@ use gpui_component::{
 
 use super::emoji_picker::{EmojiPicked, EmojiPicker};
 use super::gif_picker::{GifPicked, GifPicker};
-use super::sticker_picker::{StickerPicked, StickerPicker};
+use super::sticker_picker::{CreateStickerPressed, StickerPicked, StickerPicker};
 use crate::components::{ProductIcon, parts};
 use crate::platform::picker::AttachmentCategory;
 use crate::theme::{ActiveProductTheme as _, Metrics};
@@ -61,6 +61,8 @@ pub enum InputAreaEvent {
     SendSticker(String),
     /// The GIF popover opened; the app hands it a session to search with.
     OpenGifs,
+    /// "Create sticker" in the sticker picker: open the sticker maker.
+    CreateSticker,
     /// A GIF was picked from GIPHY.
     SendGif(Box<oxidezap_ipc::GifItem>),
 }
@@ -232,6 +234,16 @@ impl InputAreaView {
             |this, _, event: &StickerPicked, _window, cx| {
                 this.sticker_open = false;
                 cx.emit(InputAreaEvent::SendSticker(event.0.clone()));
+                cx.notify();
+            },
+        )
+        .detach();
+        cx.subscribe_in(
+            &sticker_picker,
+            window,
+            |this, _, _: &CreateStickerPressed, _window, cx| {
+                this.sticker_open = false;
+                cx.emit(InputAreaEvent::CreateSticker);
                 cx.notify();
             },
         )

@@ -170,6 +170,11 @@ impl<'a> Frames<'a> {
                     let _ = tx.send(result.map(|reply| *reply));
                 }
             }
+            DaemonMessage::Cutout { id, result } => {
+                if let Some(Awaiting::Cutout(tx)) = take_pending(self.pending, id) {
+                    let _ = tx.send(result);
+                }
+            }
             DaemonMessage::Gifs { id, result } => {
                 if let Some(Awaiting::Gifs(tx)) = take_pending(self.pending, id) {
                     let _ = tx.send(result.map(|reply| *reply));

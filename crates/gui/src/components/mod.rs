@@ -14,6 +14,8 @@ pub(crate) use composer_link::fetchable as fetchable_link;
 pub use composer_mentions::MentionCandidate;
 mod empty_state;
 mod forward_picker;
+mod sticker_maker_view;
+pub(crate) use sticker_maker_view::{StickerMakerEvent, StickerMakerView};
 mod gif_picker;
 pub(crate) use forward_picker::{ForwardEvent, ForwardPicker, ForwardTarget};
 mod icons;

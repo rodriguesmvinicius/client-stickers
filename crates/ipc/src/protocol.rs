@@ -443,6 +443,12 @@ pub enum DaemonMessage {
         id: RequestId,
         result: Result<Box<GifReply>, String>,
     },
+    /// Answers [`ClientRequest::Cutout`]: the subject's mask, a greyscale
+    /// PNG where white is kept, or why there is none.
+    Cutout {
+        id: RequestId,
+        result: Result<CutoutReply, String>,
+    },
     /// What this account occupies on disk, answering
     /// [`ClientRequest::StorageUsage`].
     Storage {
@@ -1147,6 +1153,10 @@ pub enum ClientRequest {
     /// The GIF picker: GIPHY search, previews, the key, and a send. Answered
     /// with [`DaemonMessage::Gifs`] under the request's id.
     Gifs(Box<GifRequest>),
+    /// Find the subject of a picture and the background around it, for the
+    /// sticker maker's cutout. The model runs in the daemon, which also
+    /// fetches it the first time. Answered with [`DaemonMessage::Cutout`].
+    Cutout(Box<CutoutRequest>),
     /// Fetch media the daemon has not cached yet.
     ///
     /// The one request whose answer is neither a state change nor an
@@ -1474,6 +1484,46 @@ pub enum StickerRequest {
     /// message carried, or the phone uploading that message's file again),
     /// and answer with the favorite pointed at it.
     Repair { filehash: String },
+    /// Send a sticker made in the sticker maker: a 512×512 WebP, still or
+    /// animated, with the sound it plays when it has one.
+    Create {
+        to: String,
+        #[serde(with = "oxidezap_core::base64")]
+        webp: Vec<u8>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_animated: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sound: Option<StickerSound>,
+    },
+}
+
+/// The sound a made sticker plays: an Opus clip in OGG, and its length.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StickerSound {
+    #[serde(with = "oxidezap_core::base64")]
+    pub ogg: Vec<u8>,
+    pub seconds: u32,
+}
+
+/// A picture to cut the subject out of. See [`ClientRequest::Cutout`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CutoutRequest {
+    /// The picture, as a PNG or JPEG; the daemon scales it to what the model
+    /// reads, so a small one travels faster and loses nothing.
+    #[serde(with = "oxidezap_core::base64")]
+    pub picture: Vec<u8>,
+}
+
+/// What a cutout found. See [`DaemonMessage::Cutout`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "reply", rename_all = "snake_case")]
+pub enum CutoutReply {
+    /// The mask, a greyscale PNG at the model's own size: stretch it over
+    /// the picture. White is the subject.
+    Mask {
+        #[serde(with = "oxidezap_core::base64")]
+        png: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -2647,6 +2697,45 @@ mod device_contract_tests {
 
     /// Every GIF request and reply survives the wire, the preview's bytes
     /// as text.
+    #[test]
+    fn sticker_maker_requests_round_trip() {
+        for request in [
+            ClientRequest::Stickers(Box::new(StickerRequest::Create {
+                to: "559900000001@s.whatsapp.net".into(),
+                webp: vec![1, 2, 3],
+                is_animated: true,
+                sound: Some(StickerSound {
+                    ogg: vec![4, 5],
+                    seconds: 3,
+                }),
+            })),
+            ClientRequest::Stickers(Box::new(StickerRequest::Create {
+                to: "559900000001@s.whatsapp.net".into(),
+                webp: vec![1],
+                is_animated: false,
+                sound: None,
+            })),
+            ClientRequest::Cutout(Box::new(CutoutRequest {
+                picture: vec![9, 9],
+            })),
+        ] {
+            let encoded = serde_json::to_string(&request).unwrap();
+            assert_eq!(
+                serde_json::from_str::<ClientRequest>(&encoded).unwrap(),
+                request
+            );
+        }
+        let reply = DaemonMessage::Cutout {
+            id: 7,
+            result: Ok(CutoutReply::Mask { png: vec![1] }),
+        };
+        let encoded = serde_json::to_string(&reply).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DaemonMessage>(&encoded).unwrap(),
+            reply
+        );
+    }
+
     #[test]
     fn gif_requests_and_replies_round_trip() {
         let gif = GifItem {

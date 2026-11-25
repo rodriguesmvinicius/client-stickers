@@ -95,6 +95,34 @@ pub(crate) fn picture(
     )
 }
 
+/// An emoji's artwork as pixels, for drawing it somewhere other than the
+/// screen: the sticker maker puts emoji on a sticker as pictures.
+pub(crate) fn artwork(
+    text: &str,
+    window: &mut gpui::Window,
+) -> Option<std::sync::Arc<image::RgbaImage>> {
+    let face = crate::platform::fonts::emoji_bytes()?;
+    let runs = [gpui::TextRun {
+        len: text.len(),
+        font: gpui::font(FAMILY),
+        color: gpui::Hsla::default(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }];
+    let line = window
+        .text_system()
+        .layout_line(text, window.rem_size(), &runs, None);
+    let glyph = line
+        .runs
+        .iter()
+        .flat_map(|run| &run.glyphs)
+        .find(|glyph| glyph.is_emoji && glyph.id.0 != 0)?;
+    let png = glyph_png(face, glyph.id.0 as usize)?;
+    let picture = image::load_from_memory(png).ok()?.to_rgba8();
+    Some(std::sync::Arc::new(picture))
+}
+
 fn picture_with_face(
     text: &str,
     size: impl Into<gpui::Length> + Clone,

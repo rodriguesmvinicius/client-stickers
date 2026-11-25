@@ -2304,6 +2304,26 @@ fn sticker_task(
                     .map(|_| StickerReply::Done)
             })
         }
+        StickerRequest::Create {
+            to,
+            webp,
+            is_animated,
+            sound,
+        } => {
+            let task = client.send_created_sticker(
+                to,
+                oxidezap_session::CreatedSticker {
+                    webp,
+                    is_animated,
+                    sound: sound.map(|sound| (sound.ogg, sound.seconds)),
+                },
+            );
+            oxidezap_session::spawn(async move {
+                task.await
+                    .map_err(|_| "the session stopped".to_string())?
+                    .map(|_| StickerReply::Done)
+            })
+        }
     }
 }
 

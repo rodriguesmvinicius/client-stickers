@@ -101,7 +101,7 @@ pub use waveform::{WAVEFORM_SAMPLES, generate_waveform};
 #[cfg(not(target_family = "wasm"))]
 pub use call_device::open_call_audio;
 #[cfg(not(target_family = "wasm"))]
-pub use player::{AudioPlayer, PreparedAudio};
+pub use player::{AudioPlayer, PreparedAudio, decode_audio_file};
 #[cfg(not(target_family = "wasm"))]
 pub use recorder::AudioRecorder;
 

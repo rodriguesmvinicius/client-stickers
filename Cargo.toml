@@ -250,8 +250,10 @@ opt-level = "z"
 opt-level = "z"
 [profile.release.package.rustybuzz]
 opt-level = "z"
+# "s" rather than "z": besides the icons, the sticker maker composites every
+# frame of an animated sticker through it.
 [profile.release.package.tiny-skia]
-opt-level = "z"
+opt-level = "s"
 [profile.release.package.regex-automata]
 opt-level = "z"
 [profile.release.package.regex]

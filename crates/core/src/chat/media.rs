@@ -244,6 +244,11 @@ pub struct MediaContent {
     /// falls back to a flat bar rather than inventing a shape.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waveform: Option<Arc<Vec<u8>>>,
+    /// The sound a sticker plays when tapped, for the stickers that carry
+    /// one: an Opus clip uploaded beside the picture and fetched only when
+    /// asked for. Its length is in the downloadable's `duration_secs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound: Option<DownloadableMedia>,
 }
 
 impl MediaContent {
@@ -275,6 +280,7 @@ impl MediaContent {
             duration_secs: None,
             data_is_preview: false,
             waveform: None,
+            sound: None,
         }
     }
 
@@ -370,6 +376,12 @@ impl MediaContent {
     /// every site.
     pub fn with_download(mut self, downloadable: Option<DownloadableMedia>) -> Self {
         self.downloadable = downloadable;
+        self
+    }
+
+    /// The sound a sticker carries, where it carries one.
+    pub fn with_sound(mut self, sound: Option<DownloadableMedia>) -> Self {
+        self.sound = sound;
         self
     }
 

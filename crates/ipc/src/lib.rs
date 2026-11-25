@@ -56,12 +56,12 @@ pub use oxidezap_wire as wire;
 pub use protocol::{
     AccountIdentity, AccountOverview, AccountStatus, AccountsSnapshot, AvatarDemand, CallAction,
     CallDeviceAction, CallDeviceReply, CameraPreviewFrame, ChatSummary, ClientRequest, ClientScope,
-    ConnectionState, DaemonEvent, DaemonMessage, Download, EditMessage, EnsureAvatars,
-    ForwardMessage, GifItem, GifReply, GifRequest, GroupMembers, InstallPlugin, LinkPreviewRequest,
-    LoadChats, LoadMessages, MarkAudioPlayed, MarkRead, MarkStatusWatched, MessagePreview,
-    PageCursor, PairingCode, ProtocolError, Request, RequestId, RevokeMessage, SendAudio,
-    SendMedia, SendReaction, SendText, StateSnapshot, StateVersion, StickerReply, StickerRequest,
-    Typing, VotePoll,
+    ConnectionState, CutoutReply, CutoutRequest, DaemonEvent, DaemonMessage, Download, EditMessage,
+    EnsureAvatars, ForwardMessage, GifItem, GifReply, GifRequest, GroupMembers, InstallPlugin,
+    LinkPreviewRequest, LoadChats, LoadMessages, MarkAudioPlayed, MarkRead, MarkStatusWatched,
+    MessagePreview, PageCursor, PairingCode, ProtocolError, Request, RequestId, RevokeMessage,
+    SendAudio, SendMedia, SendReaction, SendText, StateSnapshot, StateVersion, StickerReply,
+    StickerRequest, StickerSound, Typing, VotePoll,
 };
 pub use transport::{
     ACCOUNT_STAGED_INFIX, DEFAULT_WEB_PORT, MAX_STAGED_BYTES, PROTOCOL_VERSION, STAGED_PREFIX,

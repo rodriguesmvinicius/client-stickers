@@ -40,6 +40,9 @@ const VISIBLE_ROWS: f32 = 3.2;
 /// A favorite was clicked: send it, by its hash.
 pub(super) struct StickerPicked(pub String);
 
+/// "Create sticker" was pressed: open the sticker maker.
+pub(super) struct CreateStickerPressed;
+
 enum Thumb {
     Queued,
     Loading,
@@ -85,6 +88,7 @@ pub(super) struct StickerPicker {
 const DRAWN_KEPT: usize = COLUMNS * 12;
 
 impl EventEmitter<StickerPicked> for StickerPicker {}
+impl EventEmitter<CreateStickerPressed> for StickerPicker {}
 
 impl StickerPicker {
     pub fn new(window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> Self {
@@ -616,6 +620,21 @@ impl Render for StickerPicker {
                                         )),
                                 )
                             }),
+                    )
+                    .when(
+                        crate::platform::sticker_maker_unavailable().is_none(),
+                        |row| {
+                            row.child(
+                                Button::new("sticker-create")
+                                    .icon(gpui_component::IconName::Plus)
+                                    .label(crate::tr!(CreateSticker))
+                                    .primary()
+                                    .xsmall()
+                                    .on_click(
+                                        cx.listener(|_, _, _, cx| cx.emit(CreateStickerPressed)),
+                                    ),
+                            )
+                        },
                     )
                     .child(
                         Button::new("sticker-resync")

@@ -19,6 +19,7 @@
 pub mod account;
 pub mod avatar;
 mod claim;
+pub mod cutout;
 pub mod embedded;
 pub mod giphy;
 pub mod link_preview;

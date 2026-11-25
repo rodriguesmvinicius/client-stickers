@@ -41,7 +41,13 @@ gpui-base = { git = "https://github.com/longbridge/gpui-kit.git", features = ["g
 gpui-component = { git = "https://github.com/longbridge/gpui-kit.git", features = ["gpui-fast"] }
 gpui-kit-assets = { git = "https://github.com/longbridge/gpui-kit.git", features = ["gpui-fast"] }
 
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+# GIF too, for the sticker maker: an animated GIF becomes an animated sticker.
+image = { version = "0.25.10", default-features = false, features = ["gif", "png", "jpeg", "webp"] }
+# The sticker maker draws a sticker on the CPU, where it is encoded: the
+# picture, its cutout and outline, strokes, and text from a bundled font.
+# Both already in the tree under resvg, so neither adds a crate.
+tiny-skia = "0.11.4"
+ttf-parser = "0.25.1"
 # Ordered maps for deterministic cache eviction
 indexmap = "2.14.2"
 log = { workspace = true }
@@ -98,6 +104,11 @@ wacore-binary = { workspace = true }
 smol = "2.0.2"
 gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 openh264 = "0.9.9" # H.264 software decoder
+# Lossy WebP, still and animated, for the sticker maker: the `image` crate
+# writes only lossless WebP, which no 512x512 photo fits in WhatsApp's 100 KB
+# (still) or 500 KB (animated) sticker limits. libwebp, built from source.
+libwebp-sys2 = { version = "0.2.0", features = ["static", "1_2"] }
+webp-animation = { version = "0.10.0", features = ["static"] }
 
 # The one Win32 constant the daemon spawn names (`CREATE_NO_WINDOW`), and
 # nothing else: process creation flags are std, and the value itself belongs

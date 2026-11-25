@@ -201,6 +201,11 @@ fn an_omitted_field_comes_back_as_what_it_was() {
         duration_secs: Some(3),
         data_is_preview: true,
         waveform: None,
+        sound: Some(serde_json::from_value(serde_json::json!({
+            "direct_path":"/v/sound-fixture", "media_key":vec![5;32], "file_enc_sha256":vec![6;32],
+            "file_sha256":vec![7;32], "static_url":null, "is_thumbnail":false,
+            "file_length":0, "mime_type":"audio/ogg; codecs=opus", "duration_secs":4, "download_type":"audio"
+        })).unwrap()),
     });
     let line = serde_json::to_string(&full).expect("serializes");
     assert_eq!(

@@ -12,7 +12,7 @@ use gpui::{
 };
 use gpui_component::ActiveTheme as _;
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::{Disableable as _, Icon, IconName};
+use gpui_component::{Disableable as _, Icon, IconName, Sizable as _};
 use image::{AnimationDecoder as _, ImageDecoder as _};
 
 use crate::app::WhatsAppApp;
@@ -155,129 +155,153 @@ pub(super) fn render_media_content(
             }
         }
         MediaType::Sticker => {
-            // The whole canvas gets the same box in every loading state.
-            // Contain preserves non-square content and transparent padding.
-            // Explicit square aspect ratios below prevent GPUI from replacing
-            // the box's ratio with intrinsic dimensions after decoding.
-            let (display_w, display_h) = (sticker_size, sticker_size);
+            // A sticker that plays a sound: a button under it, as the phone
+            // puts a speaker on it. Played like a voice note, under its own
+            // key so it is never mistaken for one (or marked as played).
+            let sound_button = media_content.sound.clone().map(|sound| {
+                let entity = entity.clone();
+                let message_id = message_id.clone();
+                gpui_component::button::Button::new(SharedString::from(format!(
+                    "sticker-sound-{message_id}"
+                )))
+                .icon(gpui_component::Icon::new(
+                    crate::components::ProductIcon::Sound,
+                ))
+                .label(crate::tr!(PlayStickerSound))
+                .xsmall()
+                .ghost()
+                .on_click(move |_, _, cx| {
+                    let key = format!("{message_id}#sound");
+                    let sound = sound.clone();
+                    entity.update(cx, |app, cx| app.toggle_audio_lazy(key, sound, cx));
+                })
+            });
+            let el = {
+                // The whole canvas gets the same box in every loading state.
+                // Contain preserves non-square content and transparent padding.
+                // Explicit square aspect ratios below prevent GPUI from replacing
+                // the box's ratio with intrinsic dimensions after decoding.
+                let (display_w, display_h) = (sticker_size, sticker_size);
 
-            if media_content.data_is_preview
-                && let Some(format) = still_image_format(&media_content)
-                && let Some(dl) = media_content.downloadable.clone()
-            {
-                // Only the fallback PNG thumbnail is local: tapping fetches
-                // the real sticker, mirroring the image preview branch. From
-                // the cache where there is one — the thumbnail is a picture
-                // like any other, and this branch takes precedence over the
-                // one below, so rebuilding it here was the whole saving of
-                // that cache given back on every repaint.
-                let image = match decoded_image {
-                    Some(cached) => img(cached.source(false))
-                        .w(px(display_w))
-                        .h(px(display_h))
-                        .aspect_square()
-                        .when(cfg!(test), |image| {
-                            image.debug_selector(|| "sticker-image".into())
-                        })
-                        .object_fit(gpui::ObjectFit::Contain),
-                    None => render_image_from_bytes(
-                        media_content.data,
-                        format,
-                        display_w,
-                        display_h,
-                        cx.product().metrics.radius_lg(),
-                        false,
-                    )
-                    .aspect_square()
-                    .when(cfg!(test), |image| {
-                        image.debug_selector(|| "sticker-image".into())
-                    }),
-                };
-                let preview_id: SharedString = format!("sticker-preview-{}", message_id).into();
-                el.child(
-                    div()
-                        .id(preview_id)
-                        .cursor_pointer()
-                        .on_click(move |_, _window, cx| {
-                            let msg_id = message_id.clone();
-                            let dl = dl.clone();
-                            entity.update(cx, |app, cx| {
-                                app.download_image(chat_jid.to_string(), msg_id, dl, cx);
-                            });
-                        })
-                        .child(image),
-                )
-            } else {
-                match (sticker_render_kind(&media_content), decoded_image) {
-                    (Some(_kind), Some(cached_image)) => {
-                        let sticker_id: SharedString = format!("sticker-{}", message_id).into();
-                        let image = img(sticker_image_source(cached_image))
-                            .id(sticker_id)
+                if media_content.data_is_preview
+                    && let Some(format) = still_image_format(&media_content)
+                    && let Some(dl) = media_content.downloadable.clone()
+                {
+                    // Only the fallback PNG thumbnail is local: tapping fetches
+                    // the real sticker, mirroring the image preview branch. From
+                    // the cache where there is one — the thumbnail is a picture
+                    // like any other, and this branch takes precedence over the
+                    // one below, so rebuilding it here was the whole saving of
+                    // that cache given back on every repaint.
+                    let image = match decoded_image {
+                        Some(cached) => img(cached.source(false))
                             .w(px(display_w))
                             .h(px(display_h))
                             .aspect_square()
                             .when(cfg!(test), |image| {
                                 image.debug_selector(|| "sticker-image".into())
                             })
-                            .object_fit(gpui::ObjectFit::Contain);
-                        el.child(image)
-                    }
-                    (_, cached_image) => {
-                        // A sticker must stay a sticker when its WebP payload
-                        // cannot be decoded. Never send it through the photo
-                        // renderer, which hides the actual media failure.
-                        if media_content.downloadable.is_none()
-                            && let Some(format) = still_image_format(&media_content)
-                            && format != gpui::ImageFormat::Webp
-                        {
-                            el.child(match cached_image {
-                                Some(cached) => img(cached.source(false))
-                                    .w(px(display_w))
-                                    .h(px(display_h))
-                                    .aspect_square()
-                                    .when(cfg!(test), |image| {
-                                        image.debug_selector(|| "sticker-image".into())
-                                    })
-                                    .object_fit(gpui::ObjectFit::Contain)
-                                    .into_any_element(),
-                                None => render_image_from_bytes(
-                                    media_content.data,
-                                    format,
-                                    display_w,
-                                    display_h,
-                                    cx.product().metrics.radius_lg(),
-                                    false,
-                                )
+                            .object_fit(gpui::ObjectFit::Contain),
+                        None => render_image_from_bytes(
+                            media_content.data,
+                            format,
+                            display_w,
+                            display_h,
+                            cx.product().metrics.radius_lg(),
+                            false,
+                        )
+                        .aspect_square()
+                        .when(cfg!(test), |image| {
+                            image.debug_selector(|| "sticker-image".into())
+                        }),
+                    };
+                    let preview_id: SharedString = format!("sticker-preview-{}", message_id).into();
+                    el.child(
+                        div()
+                            .id(preview_id)
+                            .cursor_pointer()
+                            .on_click(move |_, _window, cx| {
+                                let msg_id = message_id.clone();
+                                let dl = dl.clone();
+                                entity.update(cx, |app, cx| {
+                                    app.download_image(chat_jid.to_string(), msg_id, dl, cx);
+                                });
+                            })
+                            .child(image),
+                    )
+                } else {
+                    match (sticker_render_kind(&media_content), decoded_image) {
+                        (Some(_kind), Some(cached_image)) => {
+                            let sticker_id: SharedString = format!("sticker-{}", message_id).into();
+                            let image = img(sticker_image_source(cached_image))
+                                .id(sticker_id)
+                                .w(px(display_w))
+                                .h(px(display_h))
                                 .aspect_square()
                                 .when(cfg!(test), |image| {
                                     image.debug_selector(|| "sticker-image".into())
                                 })
-                                .into_any_element(),
-                            })
-                        } else if let Some(dl) = media_content.downloadable.clone() {
-                            el.child(render_download_placeholder(
-                                "sticker-dl",
-                                crate::tr!(StickerTapToDownload),
-                                chat_jid,
-                                message_id,
-                                dl,
-                                entity,
-                                is_downloading,
-                                display_w,
-                                display_h,
-                                cx,
-                            ))
-                        } else {
-                            el.child(render_media_placeholder(
-                                crate::tr!(Sticker),
-                                display_w,
-                                display_h,
-                                cx,
-                            ))
+                                .object_fit(gpui::ObjectFit::Contain);
+                            el.child(image)
+                        }
+                        (_, cached_image) => {
+                            // A sticker must stay a sticker when its WebP payload
+                            // cannot be decoded. Never send it through the photo
+                            // renderer, which hides the actual media failure.
+                            if media_content.downloadable.is_none()
+                                && let Some(format) = still_image_format(&media_content)
+                                && format != gpui::ImageFormat::Webp
+                            {
+                                el.child(match cached_image {
+                                    Some(cached) => img(cached.source(false))
+                                        .w(px(display_w))
+                                        .h(px(display_h))
+                                        .aspect_square()
+                                        .when(cfg!(test), |image| {
+                                            image.debug_selector(|| "sticker-image".into())
+                                        })
+                                        .object_fit(gpui::ObjectFit::Contain)
+                                        .into_any_element(),
+                                    None => render_image_from_bytes(
+                                        media_content.data,
+                                        format,
+                                        display_w,
+                                        display_h,
+                                        cx.product().metrics.radius_lg(),
+                                        false,
+                                    )
+                                    .aspect_square()
+                                    .when(cfg!(test), |image| {
+                                        image.debug_selector(|| "sticker-image".into())
+                                    })
+                                    .into_any_element(),
+                                })
+                            } else if let Some(dl) = media_content.downloadable.clone() {
+                                el.child(render_download_placeholder(
+                                    "sticker-dl",
+                                    crate::tr!(StickerTapToDownload),
+                                    chat_jid,
+                                    message_id,
+                                    dl,
+                                    entity,
+                                    is_downloading,
+                                    display_w,
+                                    display_h,
+                                    cx,
+                                ))
+                            } else {
+                                el.child(render_media_placeholder(
+                                    crate::tr!(Sticker),
+                                    display_w,
+                                    display_h,
+                                    cx,
+                                ))
+                            }
                         }
                     }
                 }
-            }
+            };
+            el.children(sound_button)
         }
         MediaType::Video => el.child(render_video_player(
             media_content,

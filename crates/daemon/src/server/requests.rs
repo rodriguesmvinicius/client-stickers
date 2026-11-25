@@ -353,6 +353,22 @@ pub(super) async fn handle_request(
                 }
             }
         }
+        // The model and the network are the daemon's; the answer goes back
+        // off the connection, like a link's card.
+        ClientRequest::Cutout(request) => {
+            let id = match addressed(id, "a cutout needs an id to answer under") {
+                Ok(id) => id,
+                Err(refusal) => return refusal,
+            };
+            let outbox = outbox.clone();
+            oxidezap_session::spawn(async move {
+                let result = crate::cutout::cutout(request.picture).await;
+                if let Ok(frame) = serde_json::to_string(&DaemonMessage::Cutout { id, result }) {
+                    let _ = outbox.send(frame).await;
+                }
+            });
+            Answer::frame(None)
+        }
         ClientRequest::ForgetSession => acted(
             dispatch(
                 hub,

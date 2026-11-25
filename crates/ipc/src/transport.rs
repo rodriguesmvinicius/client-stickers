@@ -295,7 +295,8 @@ use std::path::PathBuf;
 /// 45 adds `ClientRequest::LinkPreview` and the card a `SendText` carries.
 /// 46 adds `ClientRequest::Gifs`, the GIPHY picker.
 /// 47 adds the people a `SendText` `@`-mentions.
-pub const PROTOCOL_VERSION: u32 = 47;
+/// 48 adds the sticker maker: `StickerRequest::Create` and `Cutout`.
+pub const PROTOCOL_VERSION: u32 = 48;
 
 /// Where the daemon's web bridge listens when nobody says otherwise.
 ///

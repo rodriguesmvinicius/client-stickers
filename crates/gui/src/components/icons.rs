@@ -36,6 +36,12 @@ pub enum ProductIcon {
     Sticker,
     /// GIFs from GIPHY, beside the stickers.
     Gif,
+    /// The sticker maker's cutout.
+    Scissors,
+    /// The sticker maker's freehand drawing.
+    Pen,
+    /// A sound: a sticker that plays one, or adding one.
+    Sound,
     Trash,
     Volume,
     Shield,
@@ -52,7 +58,7 @@ pub enum ProductIcon {
 
 impl ProductIcon {
     /// Every icon, so a test can prove each one actually loads.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 35] = [
         Self::Phone,
         Self::PhoneOff,
         Self::Video,
@@ -74,6 +80,9 @@ impl ProductIcon {
         Self::FileText,
         Self::Sticker,
         Self::Gif,
+        Self::Scissors,
+        Self::Pen,
+        Self::Sound,
         Self::Trash,
         Self::Volume,
         Self::Shield,
@@ -111,6 +120,9 @@ impl ProductIcon {
             Self::FileText => "icons/file-text.svg",
             Self::Sticker => "icons/sticker.svg",
             Self::Gif => "icons/gif.svg",
+            Self::Scissors => "icons/scissors.svg",
+            Self::Pen => "icons/pen.svg",
+            Self::Sound => "icons/sound.svg",
             Self::Trash => "icons/trash.svg",
             Self::Volume => "icons/volume.svg",
             Self::Shield => "icons/shield.svg",

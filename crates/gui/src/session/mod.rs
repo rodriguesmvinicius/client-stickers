@@ -315,6 +315,8 @@ enum Awaiting {
     LinkPreview(oneshot::Sender<Result<Option<oxidezap_core::LinkPreview>, String>>),
     /// A page of GIFs, one's preview, or a GIF sent.
     Gifs(oneshot::Sender<Result<oxidezap_ipc::GifReply, String>>),
+    /// A picture's subject, cut out of it for the sticker maker.
+    Cutout(oneshot::Sender<Result<oxidezap_ipc::CutoutReply, String>>),
     /// A message drawn before it was sent. On refusal it has to stop being
     /// pending, and the front end is the side that knows which bubble it is.
     Send {
@@ -391,6 +393,7 @@ impl Awaiting {
             Self::Stickers(tx) => tx.is_closed(),
             Self::LinkPreview(tx) => tx.is_closed(),
             Self::Gifs(tx) => tx.is_closed(),
+            Self::Cutout(tx) => tx.is_closed(),
             Self::Acted(tx) => tx.is_closed(),
             Self::Installed { tell, .. } => tell.is_closed(),
             Self::Removed(tx) => tx.is_closed(),
@@ -434,6 +437,9 @@ impl Awaiting {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::Gifs(tx) => {
+                let _ = tx.send(Err(detail.to_string()));
+            }
+            Self::Cutout(tx) => {
                 let _ = tx.send(Err(detail.to_string()));
             }
             Self::Mutation(tx) => {
@@ -1836,6 +1842,20 @@ impl SessionHandle {
     ) -> oneshot::Receiver<Result<oxidezap_ipc::GifReply, String>> {
         let (tx, rx) = oneshot::channel();
         self.ask(ClientRequest::Gifs(Box::new(request)), Awaiting::Gifs(tx));
+        rx
+    }
+
+    /// Find the subject of `picture` and the background around it: the
+    /// sticker maker's cutout. The first one fetches the model.
+    pub fn cutout(
+        &self,
+        picture: Vec<u8>,
+    ) -> oneshot::Receiver<Result<oxidezap_ipc::CutoutReply, String>> {
+        let (tx, rx) = oneshot::channel();
+        self.ask(
+            ClientRequest::Cutout(Box::new(oxidezap_ipc::CutoutRequest { picture })),
+            Awaiting::Cutout(tx),
+        );
         rx
     }
 

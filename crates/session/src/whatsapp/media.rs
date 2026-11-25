@@ -80,14 +80,33 @@ async fn download_media<T: Downloadable>(
 }
 
 /// Some animated stickers arrive wrapped in the `lottie_sticker_message`
-/// future-proof envelope instead of the top-level `sticker_message`.
+/// future-proof envelope instead of the top-level `sticker_message`, and a
+/// sticker with sound may come in the `audio_sticker_message` one.
 fn effective_sticker(msg: &wa::Message) -> Option<&wa::message::StickerMessage> {
     msg.sticker_message.as_option().or_else(|| {
-        msg.lottie_sticker_message
-            .as_option()
-            .and_then(|w| w.message.as_option())
-            .and_then(|m| m.sticker_message.as_option())
+        [&msg.lottie_sticker_message, &msg.audio_sticker_message]
+            .into_iter()
+            .find_map(|wrapper| {
+                wrapper
+                    .as_option()
+                    .and_then(|w| w.message.as_option())
+                    .and_then(|m| m.sticker_message.as_option())
+            })
     })
+}
+
+/// The sound a sticker plays, where it carries one: the Opus clip uploaded
+/// beside the picture, fetchable like a voice note.
+fn sticker_sound(sticker: &wa::message::StickerMessage) -> Option<DownloadableMedia> {
+    use whatsapp_rust::waproto::whatsapp::__buffa::oneof::message::sticker_message::Audio;
+    let Some(Audio::AudioMessage(audio)) = sticker.audio.as_ref() else {
+        return None;
+    };
+    let mime = audio
+        .mimetype
+        .clone()
+        .unwrap_or_else(|| "audio/ogg; codecs=opus".to_string());
+    downloadable_of(audio.as_ref(), &mime, audio.seconds)
 }
 
 fn image_of(msg: &wa::Message) -> Option<&wa::message::ImageMessage> {
@@ -295,7 +314,8 @@ pub(super) fn media_of(msg: &wa::Message, fetched: Option<Vec<u8>>) -> Option<Me
                 sticker.is_animated.unwrap_or(false),
             )
             .with_size(sticker.width, sticker.height)
-            .with_download(downloadable),
+            .with_download(downloadable)
+            .with_sound(sticker_sound(sticker)),
         );
     }
 
@@ -856,6 +876,58 @@ mod tests {
         let media = media_of(&message, None).expect("lottie sticker");
         assert_eq!(media.media_type, MediaType::Sticker);
         assert_eq!(media.data.as_slice(), [1]);
+    }
+    /// A sound sticker carries its sound as an audio message inside the
+    /// sticker, fetchable on its own; a plain one carries none. Either the
+    /// bare sticker or the `audio_sticker_message` envelope is read.
+    #[test]
+    fn a_sound_sticker_brings_its_sound() {
+        let with_sound = {
+            let mut constructed: wa::message::StickerMessage = Default::default();
+            constructed.png_thumbnail = Some(vec![1]);
+            constructed.audio = Some(
+                whatsapp_rust::waproto::whatsapp::__buffa::oneof::message::sticker_message::Audio::AudioMessage(
+                    Box::new({
+                        let mut audio: wa::message::AudioMessage = Default::default();
+                        audio.direct_path = Some("/v/t62/sound".into());
+                        audio.media_key = Some(vec![7; 32]);
+                        audio.file_enc_sha256 = Some(vec![8; 32]);
+                        audio.file_sha256 = Some(vec![9; 32]);
+                        audio.seconds = Some(4);
+                        audio
+                    }),
+                ),
+            );
+            constructed
+        };
+        let bare = media_of(&sticker(with_sound.clone()), None).expect("sticker");
+        let sound = bare.sound.expect("its sound");
+        assert_eq!(sound.direct_path, "/v/t62/sound");
+        assert_eq!(sound.duration_secs, Some(4));
+        assert_eq!(
+            sound.download_type,
+            whatsapp_rust::wacore::download::MediaType::Audio
+        );
+
+        let wrapped = {
+            let mut constructed: wa::Message = Default::default();
+            constructed.audio_sticker_message = MessageField::some({
+                let mut constructed: wa::message::FutureProofMessage = Default::default();
+                constructed.message = MessageField::some(sticker(with_sound));
+                constructed
+            });
+            constructed
+        };
+        let media = media_of(&wrapped, None).expect("wrapped sound sticker");
+        assert_eq!(media.media_type, MediaType::Sticker);
+        assert!(media.sound.is_some());
+
+        let plain = {
+            let mut constructed: wa::message::StickerMessage = Default::default();
+            constructed.png_thumbnail = Some(vec![1]);
+            constructed
+        };
+        assert!(media_of(&sticker(plain), None).unwrap().sound.is_none());
     }
 }
 

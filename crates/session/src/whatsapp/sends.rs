@@ -383,6 +383,73 @@ async fn send_gif_bytes(
     }
 }
 
+/// A sticker made here, with the sound it plays where it has one.
+pub struct CreatedSticker {
+    pub webp: Vec<u8>,
+    pub is_animated: bool,
+    /// An Opus clip in OGG, and its length.
+    pub sound: Option<(Vec<u8>, u32)>,
+}
+
+impl WhatsAppClient {
+    /// Send a sticker made in the sticker maker: 512 by 512, still or
+    /// animated, and with a sound when it has one. The sound is uploaded as
+    /// its own audio file and carried inside the sticker message, so a
+    /// phone without sound stickers still shows the sticker.
+    pub fn send_created_sticker(
+        &self,
+        to: String,
+        sticker: CreatedSticker,
+    ) -> Task<Result<SentReceipt, String>> {
+        let session = self.session.clone();
+        self.exec.spawn(async move {
+            let chat: Jid = to.parse().map_err(|_| "not a chat address".to_string())?;
+            let Some(live) = session.lock().await.clone() else {
+                return Err("no session yet".to_string());
+            };
+            if sticker.webp.is_empty() {
+                return Err("the sticker is empty".to_string());
+            }
+            let sound = match sticker.sound {
+                Some((ogg, seconds)) if !ogg.is_empty() => {
+                    let upload = live
+                        .client
+                        .upload(
+                            ogg,
+                            whatsapp_rust::wacore::download::MediaType::Audio,
+                            Default::default(),
+                        )
+                        .await
+                        .map_err(|e| format!("the sound could not be uploaded: {e}"))?;
+                    let mut audio: wa::message::AudioMessage = Default::default();
+                    audio.url = Some(upload.url);
+                    audio.direct_path = Some(upload.direct_path);
+                    audio.media_key = Some(upload.media_key.to_vec());
+                    audio.file_sha256 = Some(upload.file_sha256.to_vec());
+                    audio.file_enc_sha256 = Some(upload.file_enc_sha256.to_vec());
+                    audio.file_length = Some(upload.file_length);
+                    audio.mimetype = Some("audio/ogg; codecs=opus".to_string());
+                    audio.seconds = Some(seconds.max(1));
+                    Some(audio)
+                }
+                _ => None,
+            };
+            send_sticker_message(
+                &live,
+                &chat,
+                sticker.webp,
+                StickerShape {
+                    width: Some(512),
+                    height: Some(512),
+                    is_animated: sticker.is_animated,
+                },
+                sound,
+            )
+            .await
+        })
+    }
+}
+
 /// Upload a WebP sticker, record it as this account's outgoing message, and
 /// send it. Shared by the CLI's path send and the picker's favorites.
 pub(super) async fn send_sticker_bytes(
@@ -390,6 +457,17 @@ pub(super) async fn send_sticker_bytes(
     chat: &Jid,
     data: Vec<u8>,
     shape: StickerShape,
+) -> Result<SentReceipt, String> {
+    send_sticker_message(live, chat, data, shape, None).await
+}
+
+/// [`send_sticker_bytes`], with the sound a sticker plays when it has one.
+async fn send_sticker_message(
+    live: &super::Session,
+    chat: &Jid,
+    data: Vec<u8>,
+    shape: StickerShape,
+    sound: Option<wa::message::AudioMessage>,
 ) -> Result<SentReceipt, String> {
     let client = &live.client;
     let upload = match client
@@ -417,6 +495,11 @@ pub(super) async fn send_sticker_bytes(
             constructed.width = shape.width;
             constructed.height = shape.height;
             constructed.is_animated = shape.is_animated.then_some(true);
+            constructed.audio = sound.map(|audio| {
+                whatsapp_rust::waproto::whatsapp::__buffa::oneof::message::sticker_message::Audio::AudioMessage(
+                    Box::new(audio),
+                )
+            });
             constructed
         });
         constructed

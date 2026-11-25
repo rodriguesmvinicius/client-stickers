@@ -80,6 +80,7 @@ pub use ops::{
 pub use outgoing::OutgoingFile;
 pub use paging::ReadBoundary;
 pub use profile::ProfileView;
+pub use sends::CreatedSticker;
 pub use stickers::StickerFavorite;
 
 use std::collections::{HashMap, HashSet};

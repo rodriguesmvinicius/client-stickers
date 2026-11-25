@@ -625,6 +625,12 @@ mod cpal_output {
     /// rather than refused.
     const MAX_SECONDS: usize = 30 * 60;
 
+    /// Decode an audio file of any kind this player reads into mono samples
+    /// and their rate: what the sticker maker takes a sticker's sound from.
+    pub fn decode_audio_file(data: &[u8]) -> Result<(Vec<f32>, u32), PlayerError> {
+        decode_any(data)
+    }
+
     /// Mono samples and their rate, whatever the file is. Opus in OGG goes
     /// through libopus at 48 kHz; anything else, or an OGG libopus cannot
     /// read (Vorbis), through symphonia.
@@ -1035,7 +1041,7 @@ mod cpal_output {
 }
 
 #[cfg(not(target_family = "wasm"))]
-pub use cpal_output::{AudioPlayer, PreparedAudio};
+pub use cpal_output::{AudioPlayer, PreparedAudio, decode_audio_file};
 
 #[derive(Debug)]
 pub enum PlayerError {

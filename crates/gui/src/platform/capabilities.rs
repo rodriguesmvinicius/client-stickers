@@ -89,8 +89,22 @@ pub fn calls_unavailable() -> Option<&'static str> {
     imp::calls_unavailable()
 }
 
+/// # Making stickers
+///
+/// Why this front end has no sticker maker, or `None` if it has one. The
+/// maker encodes WebP with libwebp and reads video with the native decoder,
+/// neither of which a page has; the button is not offered there.
+#[must_use]
+pub fn sticker_maker_unavailable() -> Option<&'static str> {
+    imp::sticker_maker_unavailable()
+}
+
 #[cfg(not(target_family = "wasm"))]
 mod imp {
+    pub(super) fn sticker_maker_unavailable() -> Option<&'static str> {
+        None
+    }
+
     /// openh264 is linked in.
     pub(super) fn video_decode_unavailable() -> Option<&'static str> {
         None
@@ -109,6 +123,10 @@ mod imp {
 
 #[cfg(target_family = "wasm")]
 mod imp {
+    pub(super) fn sticker_maker_unavailable() -> Option<&'static str> {
+        Some("Making stickers is not available in the web version.")
+    }
+
     /// Asked of the global rather than by constructing one: a `VideoDecoder`
     /// needs a configuration to be built and there is none to give before the
     /// file is here, which is precisely the ordering this exists to fix.

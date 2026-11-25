@@ -25,6 +25,7 @@ mod platform;
 mod responsive;
 mod retained_image;
 mod session;
+mod sticker_maker;
 mod theme;
 mod utils;
 mod video;

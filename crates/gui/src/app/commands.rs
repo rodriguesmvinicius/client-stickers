@@ -434,6 +434,9 @@ impl WhatsAppApp {
         if self.cancel_message_delete(cx) {
             return;
         }
+        if self.close_sticker_maker(cx) {
+            return;
+        }
         if self.cancel_forward(cx) {
             return;
         }

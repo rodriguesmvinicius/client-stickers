@@ -26,8 +26,8 @@ pub use store::{
 pub use video::{CameraPreview, set_camera_preferences};
 pub use whatsapp::{
     AvatarRecorder, BackfillFile, BackfillReport, ChannelView, ContactCheckView, ContactView,
-    GroupDetails, GroupListEntry, GroupParticipantView, HistoryCoverage, JoinGroupView,
-    JoinRequestView, OutgoingFile, ParticipantChange, PollView, ProfileView, ReadBoundary,
-    StickerFavorite, UiEventReceiver, UiEventTryRecvError, WhatsAppClient, prepare_store,
-    resolve_database_path, wipe_local_state,
+    CreatedSticker, GroupDetails, GroupListEntry, GroupParticipantView, HistoryCoverage,
+    JoinGroupView, JoinRequestView, OutgoingFile, ParticipantChange, PollView, ProfileView,
+    ReadBoundary, StickerFavorite, UiEventReceiver, UiEventTryRecvError, WhatsAppClient,
+    prepare_store, resolve_database_path, wipe_local_state,
 };
